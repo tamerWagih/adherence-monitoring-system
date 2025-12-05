@@ -26,12 +26,24 @@ export class EventIngestionService {
     workstationId: string,
     eventDto: CreateAdherenceEventDto,
   ): Promise<AgentAdherenceEvent> {
+    // Support both 'timestamp' and 'event_timestamp' field names
+    const timestamp = eventDto.event_timestamp || eventDto.timestamp;
+    
+    if (!timestamp) {
+      throw new Error('event_timestamp or timestamp is required');
+    }
+
+    const eventDate = new Date(timestamp);
+    if (isNaN(eventDate.getTime())) {
+      throw new Error(`Invalid timestamp format: ${timestamp}. Expected ISO 8601 format (e.g., 2025-12-05T10:30:00Z)`);
+    }
+
     const event = this.eventRepo.create({
       id: randomUUID(),
       employeeId,
       workstationId,
       eventType: eventDto.event_type,
-      eventTimestamp: new Date(eventDto.event_timestamp),
+      eventTimestamp: eventDate,
       applicationName: eventDto.application_name,
       applicationPath: eventDto.application_path,
       windowTitle: eventDto.window_title,

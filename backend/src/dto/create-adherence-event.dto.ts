@@ -8,6 +8,7 @@ import {
   MaxLength,
   ValidateNested,
   IsArray,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -29,8 +30,15 @@ export class CreateAdherenceEventDto {
   @IsEnum(EventType)
   event_type: EventType;
 
+  // Support both 'timestamp' and 'event_timestamp' for API compatibility
+  // At least one must be provided
   @IsISO8601()
-  event_timestamp: string;
+  @ValidateIf((o) => !o.timestamp)
+  event_timestamp?: string;
+
+  @IsISO8601()
+  @ValidateIf((o) => !o.event_timestamp)
+  timestamp?: string;
 
   @IsString()
   @IsOptional()
