@@ -77,18 +77,35 @@ curl http://10.20.13.82/health
 
 #### 1.3 Admin Health Endpoint
 ```bash
-curl http://adherence-server/api/adherence/admin/health
+# Requires Authorization header (any Bearer token works in Week 2)
+curl http://adherence-server/api/adherence/admin/health \
+  -H "Authorization: Bearer placeholder-token"
 ```
 
 **Expected Response:**
 ```json
 {
   "status": "healthy",
-  "database": "connected",
-  "redis": "connected",
-  "timestamp": "..."
+  "timestamp": "2025-12-05T...",
+  "services": {
+    "database": {
+      "status": "connected",
+      "response_time_ms": 15
+    },
+    "redis": {
+      "status": "unknown",
+      "response_time_ms": 0
+    }
+  },
+  "metrics": {
+    "events_ingested_last_hour": 0,
+    "events_ingested_last_24h": 0,
+    "active_workstations": 0
+  }
 }
 ```
+
+**Note:** In Week 2, any Bearer token is accepted (placeholder auth). In Week 5, this will require a valid JWT token with WFM_Admin role.
 
 ---
 

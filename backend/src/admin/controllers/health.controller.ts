@@ -1,4 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
+import { RolesGuard } from '../../guards/roles.guard';
+import { Roles } from '../../decorators/roles.decorator';
 import { HealthService } from '../services/health.service';
 
 /**
@@ -6,18 +9,24 @@ import { HealthService } from '../services/health.service';
  * 
  * Admin endpoints for system health monitoring.
  * 
- * Note: Health endpoint is public for monitoring purposes.
- * In production, consider adding IP whitelist or basic auth.
+ * Authentication: JWT + WFM_Admin role required (per API specification).
+ * The health endpoint returns sensitive metrics (event counts, database status, etc.)
+ * and should only be accessible to administrators.
+ * 
+ * For Week 2: Works with placeholder JWT auth (any Bearer token accepted).
+ * For Week 5: Will require full JWT validation.
  */
 @Controller('admin/health')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('WFM_Admin')
 export class HealthController {
   constructor(private healthService: HealthService) {}
 
   /**
    * GET /api/adherence/admin/health
    * 
-   * Get system health status.
-   * Public endpoint for monitoring (no authentication required).
+   * Get system health status with detailed metrics.
+   * Requires: Authorization header with Bearer token (any token works in Week 2).
    */
   @Get()
   async getSystemHealth() {
