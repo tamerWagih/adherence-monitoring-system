@@ -1,75 +1,85 @@
 # Backend Build Test Commands
 
-## On VM (Linux)
+## Using Docker (Recommended)
 
-### 1. Navigate to Backend Directory
+### 1. Navigate to Repository Root
 ```bash
-cd adherence-monitoring-system/backend
+cd adherence-monitoring-system
 ```
 
-### 2. Install Dependencies
+### 2. Build Backend Docker Image
 ```bash
-npm install
-```
-
-**Note:** This may take a few minutes as it installs all NestJS dependencies.
-
-### 3. Build the Project
-```bash
-npm run build
+docker-compose build backend
 ```
 
 **Expected Output:**
-- Should compile TypeScript to JavaScript
-- Should create `dist/` directory
-- Should show "Build completed successfully" or similar
+- Downloads Node.js base image
+- Installs dependencies
+- Compiles TypeScript
+- Creates Docker image
 
-### 4. (Optional) Check Build Output
+### 3. Check if Image was Created
 ```bash
-ls -la dist/
-# Should see: main.js, app.module.js, app.controller.js, app.service.js
+docker images | grep adherence-backend
 ```
 
-### 5. (Optional) Try to Start (Will Fail on DB Connection - This is Expected)
+### 4. (Optional) Test Run Container (Will fail on DB connection - Expected)
 ```bash
-npm run start:prod
+docker-compose up backend
 ```
 
 **Expected Behavior:**
+- Container starts
 - May fail with database connection error (this is OK - we haven't set up entities yet)
-- Or may start but fail when trying to connect to DB
-- This is expected until we configure entities in Week 5
+- Or may show connection errors when trying to connect to PostgreSQL
+- This is expected until we configure TypeORM entities in Week 5
 
-### 6. Check for Errors
+### 5. Check Container Logs
 ```bash
-# If build fails, check for:
-# - Missing dependencies (run npm install again)
-# - TypeScript errors (check tsconfig.json)
-# - Missing files (verify all src files exist)
+docker-compose logs backend
+```
+
+### 6. Stop Container
+```bash
+docker-compose down
+```
+
+## Alternative: Build All Services
+```bash
+# Build all services (backend, frontend, nginx)
+docker-compose build
+
+# Or build without cache (if you need fresh build)
+docker-compose build --no-cache backend
 ```
 
 ## Troubleshooting
 
-### If npm install fails:
+### If Docker build fails:
 ```bash
-# Clear cache and retry
-npm cache clean --force
-rm -rf node_modules package-lock.json
-npm install
-```
+# Check Docker is running
+docker ps
 
-### If build fails with TypeScript errors:
-```bash
-# Check TypeScript version
-npx tsc --version
+# Check docker-compose version
+docker-compose --version
 
-# Try building with verbose output
-npm run build -- --verbose
+# Build with verbose output
+docker-compose build --progress=plain backend
 ```
 
 ### If you see "Cannot find module" errors:
-```bash
-# Make sure all dependencies are installed
-npm install --legacy-peer-deps
-```
+- Make sure `backend/package.json` exists
+- Check that all dependencies are listed in package.json
+- Try building with `--no-cache` flag
 
+### If build succeeds but container fails to start:
+- Check `.env` file exists in repository root
+- Verify database connection settings in `.env`
+- Check logs: `docker-compose logs backend`
+
+## Quick Test (All in One)
+```bash
+cd adherence-monitoring-system && \
+docker-compose build backend && \
+echo "✅ Docker build completed! Check with: docker images | grep adherence"
+```
