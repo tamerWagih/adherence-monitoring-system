@@ -107,24 +107,33 @@ export class WorkstationsService {
    * Register a new workstation
    */
   async registerWorkstation(dto: RegisterWorkstationDto) {
-    // Validate that employee exists in employees table
+    // Validate that employee exists and is active in employees table
     // Use explicit UUID casting to handle any format issues
-    const employeeExists = await this.dataSource.query(
-      'SELECT id FROM employees WHERE id = $1::uuid',
+    const employee = await this.dataSource.query(
+      'SELECT id, status FROM employees WHERE id = $1::uuid',
       [dto.employee_id],
     );
 
-    if (!employeeExists || employeeExists.length === 0) {
+    if (!employee || employee.length === 0) {
       // Try to get some sample employee IDs for debugging
       const sampleEmployees = await this.dataSource.query(
-        'SELECT id::text as id FROM employees LIMIT 3',
+        'SELECT id::text as id, status FROM employees WHERE status = $1 LIMIT 3',
+        ['Active'],
       );
       
       throw new BadRequestException(
         `Employee with ID ${dto.employee_id} does not exist in the employees table.` +
         (sampleEmployees.length > 0 
-          ? ` Sample employee IDs: ${sampleEmployees.map(e => e.id).join(', ')}`
-          : ' No employees found in database.'),
+          ? ` Sample active employee IDs: ${sampleEmployees.map(e => e.id).join(', ')}`
+          : ' No active employees found in database.'),
+      );
+    }
+
+    // Check if employee is active
+    if (employee[0].status !== 'Active') {
+      throw new BadRequestException(
+        `Cannot register workstation for employee with ID ${dto.employee_id}. ` +
+        `Employee status is '${employee[0].status}'. Only active employees can have workstations registered.`,
       );
     }
 
