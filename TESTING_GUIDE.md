@@ -113,14 +113,35 @@ curl http://adherence-server/api/adherence/admin/health \
 
 **Note:** This requires JWT authentication. For now, we'll test the endpoint structure. Full JWT implementation is in Week 5.
 
-#### 2.1 Register Workstation (Structure Test)
+#### 2.1 Get a Valid Employee ID
+
+**Important:** The `employee_id` must exist in the `employees` table. Get a valid employee ID first:
 
 ```bash
+# Option 1: Query database directly
+psql -h <DATABASE_HOST> -U <DATABASE_USERNAME> -d <DATABASE_NAME> -c "SELECT id, hr_id, first_name, last_name FROM employees LIMIT 5;"
+
+# Option 2: Using Docker (if database is in container)
+docker compose exec postgres psql -U <DATABASE_USERNAME> -d <DATABASE_NAME> -c "SELECT id, hr_id, first_name, last_name FROM employees LIMIT 5;"
+```
+
+**Example output:**
+```
+                  id                  | hr_id | first_name | last_name
+--------------------------------------+-------+------------+-----------
+ 123e4567-e89b-12d3-a456-426614174000 |  1001 | John       | Doe
+ 223e4567-e89b-12d3-a456-426614174001 |  1002 | Jane       | Smith
+```
+
+#### 2.2 Register Workstation
+
+```bash
+# Replace <VALID_EMPLOYEE_ID> with an actual employee ID from step 2.1
 curl -X POST http://adherence-server/api/adherence/admin/workstations/register \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer placeholder-token" \
   -d '{
-    "employee_id": "550e8400-e29b-41d4-a716-446655440000",
+    "employee_id": "<VALID_EMPLOYEE_ID>",
     "workstation_name": "DESKTOP-TEST-001",
     "os_version": "Windows 11 Pro",
     "agent_version": "1.0.0",

@@ -1,6 +1,6 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { AgentWorkstationConfiguration } from '../../entities/agent-workstation-configuration.entity';
 import { RegisterWorkstationDto } from '../../dto/register-workstation.dto';
 import { WorkstationAuthService } from '../../adherence/services/workstation-auth.service';
@@ -17,6 +17,7 @@ export class WorkstationsService {
     @InjectRepository(AgentWorkstationConfiguration)
     private workstationRepo: Repository<AgentWorkstationConfiguration>,
     private workstationAuthService: WorkstationAuthService,
+    private dataSource: DataSource,
   ) {}
 
   /**
@@ -106,6 +107,18 @@ export class WorkstationsService {
    * Register a new workstation
    */
   async registerWorkstation(dto: RegisterWorkstationDto) {
+    // Validate that employee exists in employees table
+    const employeeExists = await this.dataSource.query(
+      'SELECT id FROM employees WHERE id = $1',
+      [dto.employee_id],
+    );
+
+    if (!employeeExists || employeeExists.length === 0) {
+      throw new BadRequestException(
+        `Employee with ID ${dto.employee_id} does not exist in the employees table.`,
+      );
+    }
+
     // Check if employee already has an active workstation
     const existing = await this.workstationRepo.findOne({
       where: { employeeId: dto.employee_id, isActive: true },
