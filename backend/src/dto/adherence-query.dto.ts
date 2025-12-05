@@ -7,7 +7,6 @@ import {
   IsOptional,
   Min,
   Max,
-  Type,
 } from 'class-validator';
 import { Type as TransformType } from 'class-transformer';
 

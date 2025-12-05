@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ThrottlerModule } from '@nestjs/throttler';
 import { AgentAdherenceEvent } from '../entities/agent-adherence-event.entity';
 import { AgentAdherenceSummary } from '../entities/agent-adherence-summary.entity';
 import { AgentAdherenceException } from '../entities/agent-adherence-exception.entity';
@@ -20,6 +19,10 @@ import { WorkstationAuthService } from './services/workstation-auth.service';
  * - Workstation configuration
  * - Adherence calculation (to be implemented)
  * - Adherence summaries (to be implemented)
+ * 
+ * Note: Rate limiting is configured globally in AppModule.
+ * Per-workstation rate limiting (10 req/min) will be implemented
+ * in Week 5 using custom throttler storage or guard.
  */
 @Module({
   imports: [
@@ -29,14 +32,6 @@ import { WorkstationAuthService } from './services/workstation-auth.service';
       AgentAdherenceException,
       AgentWorkstationConfiguration,
       ApplicationClassification,
-    ]),
-    // Per-workstation rate limiting: 10 requests/minute
-    ThrottlerModule.forFeature([
-      {
-        name: 'workstation',
-        ttl: 60000, // 1 minute
-        limit: 10, // 10 requests per minute per workstation
-      },
     ]),
   ],
   controllers: [EventsController, WorkstationConfigController],
@@ -48,4 +43,16 @@ import { WorkstationAuthService } from './services/workstation-auth.service';
   exports: [WorkstationAuthService], // Export for use in guards
 })
 export class AdherenceModule {}
+
+/**
+ * Note on Rate Limiting:
+ * 
+ * Global rate limiting is configured in AppModule (1000 req/min).
+ * Per-workstation rate limiting (10 req/min per workstation) will be
+ * implemented in Week 5 using:
+ * - Custom throttler storage (Redis-based) with workstation_id as key
+ * - Or custom guard that checks rate limits per workstation
+ * 
+ * For now, global rate limiting is sufficient for Week 2.
+ */
 
