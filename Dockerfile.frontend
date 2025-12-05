@@ -42,17 +42,23 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build the application
 RUN echo "=== Starting Next.js build ===" && \
-    npm run build && \
-    echo "=== Build completed successfully ===" && \
-    echo "=== Verifying build output ===" && \
-    (test -d .next/standalone && echo "✓ .next/standalone exists") || \
-    (echo "ERROR: .next/standalone NOT FOUND!" && exit 1) && \
+    npm run build || (echo "BUILD FAILED!" && exit 1) && \
+    echo "=== Build command completed ===" && \
+    echo "=== Checking .next directory ===" && \
+    (test -d .next && echo "✓ .next directory exists" && ls -la .next/) || \
+    (echo "ERROR: .next directory not found!" && exit 1) && \
+    echo "=== Checking standalone output ===" && \
+    (test -d .next/standalone && echo "✓ .next/standalone exists" && ls -la .next/standalone/ | head -20) || \
+    (echo "ERROR: .next/standalone NOT FOUND!" && \
+     echo "Contents of .next:" && ls -la .next/ && \
+     echo "Checking if build actually succeeded..." && \
+     exit 1) && \
+    echo "=== Checking static output ===" && \
     (test -d .next/static && echo "✓ .next/static exists") || \
-    (echo "WARNING: .next/static NOT FOUND!" && mkdir -p .next/static) && \
+    (echo "WARNING: .next/static not found, creating empty" && mkdir -p .next/static) && \
+    echo "=== Ensuring public directory exists ===" && \
     (test -d public && echo "✓ public directory exists") || \
-    (echo "INFO: public directory not found, creating empty directory" && mkdir -p public) && \
-    (test "$(ls -A public 2>/dev/null)" && echo "✓ public directory has content") || \
-    (echo "INFO: public directory is empty, creating placeholder" && touch public/.gitkeep) && \
+    (echo "INFO: public directory not found, creating empty directory" && mkdir -p public && touch public/.gitkeep) && \
     echo "=== Build verification complete ===" && \
     npm cache clean --force && \
     rm -rf /root/.npm /tmp/*
@@ -72,7 +78,8 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy public directory (guaranteed to exist from builder stage)
+# Create public directory and copy if exists
+RUN mkdir -p ./public
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
