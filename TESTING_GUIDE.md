@@ -113,17 +113,19 @@ curl http://adherence-server/api/adherence/admin/health \
 
 **Note:** This requires JWT authentication. For now, we'll test the endpoint structure. Full JWT implementation is in Week 5.
 
-#### 2.1 Get a Valid Employee ID
+#### 2.1 Get a Valid Active Employee ID
 
-**Important:** The `employee_id` must exist in the `employees` table. Get a valid employee ID first:
+**Important:** The `employee_id` must exist in the `employees` table AND have `status = 'Active'`. Get a valid active employee ID first:
 
 ```bash
-# Option 1: Query database directly
-psql -h <DATABASE_HOST> -U <DATABASE_USERNAME> -d <DATABASE_NAME> -c "SELECT id, hr_id, first_name, last_name FROM employees LIMIT 5;"
+# Option 1: Query database directly (only active employees)
+psql -h <DATABASE_HOST> -U <DATABASE_USERNAME> -d <DATABASE_NAME> -c "SELECT id, hr_id, first_name, last_name, status FROM employees WHERE status = 'Active' LIMIT 5;"
 
 # Option 2: Using Docker (if database is in container)
-docker compose exec postgres psql -U <DATABASE_USERNAME> -d <DATABASE_NAME> -c "SELECT id, hr_id, first_name, last_name FROM employees LIMIT 5;"
+docker compose exec postgres psql -U <DATABASE_USERNAME> -d <DATABASE_NAME> -c "SELECT id, hr_id, first_name, last_name, status FROM employees WHERE status = 'Active' LIMIT 5;"
 ```
+
+**Note:** Only employees with `status = 'Active'` can have workstations registered. Inactive or terminated employees will be rejected with a clear error message.
 
 **Example output:**
 ```
