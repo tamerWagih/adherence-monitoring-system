@@ -118,26 +118,31 @@ curl http://adherence-server/api/adherence/admin/health \
 ```bash
 curl -X POST http://adherence-server/api/adherence/admin/workstations/register \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Authorization: Bearer placeholder-token" \
   -d '{
     "employee_id": "550e8400-e29b-41d4-a716-446655440000",
     "workstation_name": "DESKTOP-TEST-001",
-    "workstation_mac_address": "00:1B:44:11:3A:B7"
+    "os_version": "Windows 11 Pro",
+    "agent_version": "1.0.0",
+    "notes": "Test workstation"
   }'
 ```
 
-**Expected (Week 5 with JWT):**
+**Expected Response (Week 2 with placeholder auth):**
 ```json
 {
-  "workstation_id": "uuid",
-  "api_key": "generated-api-key",
-  "workstation_name": "DESKTOP-TEST-001",
-  "employee_id": "uuid",
-  "created_at": "2025-12-05T..."
+  "workstation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "api_key": "xK9mP2qR7vT3wY8zA1bC4dE6fG9hJ0kL2mN5pQ8sT1vW4xY7z",
+  "message": "Workstation registered successfully",
+  "warning": "These credentials will not be shown again. Store them securely."
 }
 ```
 
-**Current (Week 2):** Will return 401 Unauthorized (expected - JWT not fully implemented)
+**Note:** 
+- In Week 2, any Bearer token works (placeholder auth)
+- In Week 5, will require valid JWT with WFM_Admin role
+- **Valid fields:** `employee_id` (required), `workstation_name`, `os_version`, `agent_version`, `notes` (all optional)
+- **Invalid fields:** `workstation_mac_address` is not supported
 
 ---
 
