@@ -16,8 +16,6 @@ const nextConfig: NextConfig = {
       'recharts',
     ],
   },
-  // Enable SWC minification for faster builds
-  swcMinify: true,
 };
 
 export default nextConfig;
