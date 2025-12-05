@@ -323,11 +323,11 @@ SELECT COUNT(*) FROM agent_adherence_events;
 SELECT 
   event_type,
   application_name,
-  timestamp,
+  event_timestamp,
   employee_id,
   workstation_id
 FROM agent_adherence_events
-ORDER BY timestamp DESC
+ORDER BY event_timestamp DESC
 LIMIT 10;
 ```
 
