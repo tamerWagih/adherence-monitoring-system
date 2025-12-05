@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApplicationClassification } from '../../entities/application-classification.entity';
@@ -27,7 +27,7 @@ export class WorkstationConfigService {
     });
 
     if (!workstation) {
-      throw new Error('Workstation not found');
+      throw new NotFoundException('Workstation not found');
     }
 
     // Get active application classifications
