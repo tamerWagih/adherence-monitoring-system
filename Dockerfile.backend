@@ -1,0 +1,69 @@
+# Adherence Backend Dockerfile
+# NestJS Backend Service
+
+FROM node:20-alpine
+
+# Install essential system dependencies
+RUN apk add --no-cache \
+    postgresql-client \
+    curl
+
+# Set working directory
+WORKDIR /app
+
+# Configure npm for better network resilience
+RUN npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-timeout 600000 && \
+    npm config set progress true
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN echo "=== Starting npm install ===" && \
+    npm install --legacy-peer-deps --progress=false --loglevel=info && \
+    echo "=== npm install completed successfully ===" && \
+    npm cache clean --force && \
+    rm -rf /root/.npm /tmp/*
+
+# Copy source code
+COPY . ./
+
+# Install NestJS CLI globally
+RUN npm install -g @nestjs/cli && \
+    npm cache clean --force && \
+    rm -rf /root/.npm /tmp/*
+
+# Build the application
+RUN echo "=== Starting build ===" && \
+    npm run build && \
+    echo "=== Build completed ===" && \
+    echo "=== Verifying build ===" && \
+    (test -f dist/main.js && echo "✓ dist/main.js exists") || \
+    (echo "ERROR: dist/main.js NOT FOUND!" && exit 1) && \
+    echo "=== Build verification complete ===" && \
+    npm cache clean --force && \
+    rm -rf /root/.npm /tmp/*
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nestjs -u 1001
+
+# Change ownership of the app directory
+RUN chown -R nestjs:nodejs /app
+
+# Switch to non-root user
+USER nestjs
+
+# Expose port
+EXPOSE 4001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 \
+    CMD curl -f http://localhost:4001/health || exit 1
+
+# Start the application
+CMD ["node", "dist/main.js"]
+
