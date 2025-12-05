@@ -2,7 +2,11 @@
 
 ## Overview
 
-The Adherence Monitoring System uses PostgreSQL with TypeORM. Since `synchronize: false` is set (for production safety), database schema changes must be applied manually via SQL migrations.
+**Important:** The Adherence Monitoring System shares the PostgreSQL database with the People Ops System. All database migrations must be applied to the **shared database** (`people_ops_db` or `people_ops_staging`/`people_ops_prod`).
+
+Since `synchronize: false` is set in TypeORM config (for production safety), database schema changes must be applied manually via SQL migrations.
+
+**Migration Location:** Migrations should be added to `people-ops-system/database/migrations/` and numbered sequentially.
 
 ## Migration: Add registration_source Column
 
@@ -24,41 +28,47 @@ COMMENT ON COLUMN agent_workstation_configurations.registration_source IS 'Sourc
 
 ### How to Apply
 
-#### Option 1: Using Docker Exec (Recommended)
+**Note:** The database is shared with people-ops-system. Connect to the shared database using the credentials from your `.env` file (DATABASE_HOST, DATABASE_NAME, DATABASE_USERNAME, DATABASE_PASSWORD).
 
-```bash
-# Connect to the database container
-docker compose exec adherence-db psql -U postgres -d people_ops_db
+#### Option 1: Add Migration to People Ops System (Recommended)
 
-# Then run the SQL:
+The migration should be added as `027_add_registration_source_to_workstations.sql` in `people-ops-system/database/migrations/`:
+
+```sql
+-- Migration 027: Add registration_source column to agent_workstation_configurations
+-- Date: 2025-12-05
+-- Description: Adds registration_source column to track how workstations were registered
+
+BEGIN;
+
 ALTER TABLE agent_workstation_configurations
 ADD COLUMN IF NOT EXISTS registration_source VARCHAR(50) DEFAULT 'ADMIN';
 
-# Exit psql
-\q
+COMMENT ON COLUMN agent_workstation_configurations.registration_source IS 'Source of registration: ADMIN, SELF_SERVICE (future)';
+
+COMMIT;
 ```
 
-#### Option 2: Using psql Directly
-
+Then apply it:
 ```bash
-# If you have psql installed on the VM
-psql -h localhost -U postgres -d people_ops_db
-
-# Then run the SQL:
-ALTER TABLE agent_workstation_configurations
-ADD COLUMN IF NOT EXISTS registration_source VARCHAR(50) DEFAULT 'ADMIN';
-
-# Exit psql
-\q
+# From people-ops-system directory
+psql -h <DATABASE_HOST> -U <DATABASE_USERNAME> -d <DATABASE_NAME> -f database/migrations/027_add_registration_source_to_workstations.sql
 ```
 
-#### Option 3: Using Docker Run (One-liner)
+#### Option 2: Direct SQL (Quick Fix)
 
 ```bash
-docker compose exec -T adherence-db psql -U postgres -d people_ops_db <<EOF
+# Connect to shared database (use your actual database credentials)
+psql -h <DATABASE_HOST> -U <DATABASE_USERNAME> -d <DATABASE_NAME>
+
+# Run the migration
 ALTER TABLE agent_workstation_configurations
 ADD COLUMN IF NOT EXISTS registration_source VARCHAR(50) DEFAULT 'ADMIN';
-EOF
+
+COMMENT ON COLUMN agent_workstation_configurations.registration_source IS 'Source of registration: ADMIN, SELF_SERVICE (future)';
+
+# Exit
+\q
 ```
 
 ### Verify Migration
