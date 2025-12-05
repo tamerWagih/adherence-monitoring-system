@@ -42,23 +42,48 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build the application
 RUN echo "=== Starting Next.js build ===" && \
-    npm run build || (echo "BUILD FAILED!" && exit 1) && \
+    npm run build && \
+    BUILD_EXIT_CODE=$? && \
+    echo "=== Build exit code: $BUILD_EXIT_CODE ===" && \
+    if [ $BUILD_EXIT_CODE -ne 0 ]; then \
+        echo "ERROR: Build failed with exit code $BUILD_EXIT_CODE" && \
+        exit 1; \
+    fi && \
     echo "=== Build command completed ===" && \
     echo "=== Checking .next directory ===" && \
-    (test -d .next && echo "✓ .next directory exists" && ls -la .next/) || \
-    (echo "ERROR: .next directory not found!" && exit 1) && \
+    if [ ! -d .next ]; then \
+        echo "ERROR: .next directory not found!" && \
+        exit 1; \
+    fi && \
+    echo "✓ .next directory exists" && \
+    ls -la .next/ && \
     echo "=== Checking standalone output ===" && \
-    (test -d .next/standalone && echo "✓ .next/standalone exists" && ls -la .next/standalone/ | head -20) || \
-    (echo "ERROR: .next/standalone NOT FOUND!" && \
-     echo "Contents of .next:" && ls -la .next/ && \
-     echo "Checking if build actually succeeded..." && \
-     exit 1) && \
+    if [ ! -d .next/standalone ]; then \
+        echo "ERROR: .next/standalone NOT FOUND!" && \
+        echo "Contents of .next:" && \
+        ls -la .next/ && \
+        echo "Full .next structure:" && \
+        find .next -type d -maxdepth 2 || true && \
+        echo "Build may have failed silently. Checking for errors..." && \
+        exit 1; \
+    fi && \
+    echo "✓ .next/standalone exists" && \
+    ls -la .next/standalone/ | head -20 && \
     echo "=== Checking static output ===" && \
-    (test -d .next/static && echo "✓ .next/static exists") || \
-    (echo "WARNING: .next/static not found, creating empty" && mkdir -p .next/static) && \
+    if [ ! -d .next/static ]; then \
+        echo "WARNING: .next/static not found, creating empty" && \
+        mkdir -p .next/static; \
+    else \
+        echo "✓ .next/static exists"; \
+    fi && \
     echo "=== Ensuring public directory exists ===" && \
-    (test -d public && echo "✓ public directory exists") || \
-    (echo "INFO: public directory not found, creating empty directory" && mkdir -p public && touch public/.gitkeep) && \
+    if [ ! -d public ]; then \
+        echo "INFO: public directory not found, creating empty directory" && \
+        mkdir -p public && \
+        touch public/.gitkeep; \
+    else \
+        echo "✓ public directory exists"; \
+    fi && \
     echo "=== Build verification complete ===" && \
     npm cache clean --force && \
     rm -rf /root/.npm /tmp/*
