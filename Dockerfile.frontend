@@ -8,9 +8,22 @@ FROM base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
+# Configure npm for better network resilience
+RUN npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-timeout 600000 && \
+    npm config set progress true
+
 # Copy package files
 COPY package*.json ./
-RUN npm install --legacy-peer-deps && npm cache clean --force
+
+# Install dependencies with progress output
+RUN echo "=== Starting npm install ===" && \
+    npm install --legacy-peer-deps --progress=false --loglevel=info && \
+    echo "=== npm install completed successfully ===" && \
+    npm cache clean --force && \
+    rm -rf /root/.npm /tmp/*
 
 # Rebuild the source code only when needed
 FROM base AS builder
@@ -28,7 +41,17 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build the application
-RUN npm run build
+RUN echo "=== Starting Next.js build ===" && \
+    npm run build && \
+    echo "=== Build completed successfully ===" && \
+    echo "=== Verifying build output ===" && \
+    (test -d .next/standalone && echo "✓ .next/standalone exists") || \
+    (echo "ERROR: .next/standalone NOT FOUND!" && exit 1) && \
+    (test -d .next/static && echo "✓ .next/static exists") || \
+    (echo "WARNING: .next/static NOT FOUND!" && mkdir -p .next/static) && \
+    echo "=== Build verification complete ===" && \
+    npm cache clean --force && \
+    rm -rf /root/.npm /tmp/*
 
 # Production image, copy all the files and run next
 FROM base AS runner
