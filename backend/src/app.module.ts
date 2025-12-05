@@ -6,9 +6,13 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerOptions, LogLevel } from 'typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AdherenceModule } from './adherence/adherence.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
+    AdherenceModule,
+    AdminModule,
     // Configuration Module
     ConfigModule.forRoot({
       isGlobal: true,

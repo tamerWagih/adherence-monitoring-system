@@ -9,7 +9,7 @@ cd adherence-monitoring-system
 
 ### 2. Build Backend Docker Image
 ```bash
-docker-compose build backend
+docker compose build backend
 ```
 
 **Expected Output:**
@@ -25,7 +25,7 @@ docker images | grep adherence-backend
 
 ### 4. (Optional) Test Run Container (Will fail on DB connection - Expected)
 ```bash
-docker-compose up backend
+docker compose up backend
 ```
 
 **Expected Behavior:**
@@ -36,21 +36,21 @@ docker-compose up backend
 
 ### 5. Check Container Logs
 ```bash
-docker-compose logs backend
+docker compose logs backend
 ```
 
 ### 6. Stop Container
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ## Alternative: Build All Services
 ```bash
 # Build all services (backend, frontend, nginx)
-docker-compose build
+docker compose build
 
 # Or build without cache (if you need fresh build)
-docker-compose build --no-cache backend
+docker compose build --no-cache backend
 ```
 
 ## Troubleshooting
