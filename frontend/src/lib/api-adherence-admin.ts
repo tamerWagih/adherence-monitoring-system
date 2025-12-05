@@ -137,10 +137,15 @@ export const healthApi = {
 
 /**
  * Agent Sync Status API
+ * 
+ * TODO: Backend endpoint `/admin/agents/sync-status` will be implemented in Week 5.
+ * For now, this method will throw an error to indicate the endpoint is not yet available.
  */
 export const agentsApi = {
   /**
    * Get agent sync status
+   * 
+   * @throws Error - Endpoint not implemented yet (Week 5)
    */
   getSyncStatus: async (params?: {
     employee_id?: string;
@@ -149,32 +154,47 @@ export const agentsApi = {
     page?: number;
     limit?: number;
   }) => {
-    const queryParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          queryParams.append(key, String(value));
-        }
-      });
-    }
-    const query = queryParams.toString();
-    return apiRequest(`/admin/agents/sync-status${query ? `?${query}` : ''}`);
+    // TODO: Implement backend endpoint in Week 5
+    throw new Error('Agent sync status endpoint not yet implemented. Will be available in Week 5.');
+    
+    // Week 5 implementation:
+    // const queryParams = new URLSearchParams();
+    // if (params) {
+    //   Object.entries(params).forEach(([key, value]) => {
+    //     if (value !== undefined) {
+    //       queryParams.append(key, String(value));
+    //     }
+    //   });
+    // }
+    // const query = queryParams.toString();
+    // return apiRequest(`/admin/agents/sync-status${query ? `?${query}` : ''}`);
   },
 };
 
 /**
  * Configuration API
+ * 
+ * TODO: Backend endpoints `/admin/config/applications` will be implemented in Week 5.
+ * For now, these methods will throw errors to indicate the endpoints are not yet available.
  */
 export const configApi = {
   /**
    * Get application classifications
+   * 
+   * @throws Error - Endpoint not implemented yet (Week 5)
    */
   getApplicationClassifications: async () => {
-    return apiRequest('/admin/config/applications');
+    // TODO: Implement backend endpoint in Week 5
+    throw new Error('Application classifications endpoint not yet implemented. Will be available in Week 5.');
+    
+    // Week 5 implementation:
+    // return apiRequest('/admin/config/applications');
   },
 
   /**
    * Create application classification
+   * 
+   * @throws Error - Endpoint not implemented yet (Week 5)
    */
   createApplicationClassification: async (data: {
     name_pattern?: string;
@@ -183,10 +203,14 @@ export const configApi = {
     classification: 'WORK' | 'NON_WORK' | 'NEUTRAL';
     priority?: number;
   }) => {
-    return apiRequest('/admin/config/applications', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    // TODO: Implement backend endpoint in Week 5
+    throw new Error('Create application classification endpoint not yet implemented. Will be available in Week 5.');
+    
+    // Week 5 implementation:
+    // return apiRequest('/admin/config/applications', {
+    //   method: 'POST',
+    //   body: JSON.stringify(data),
+    // });
   },
 };
 
