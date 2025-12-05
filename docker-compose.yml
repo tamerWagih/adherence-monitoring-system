@@ -14,7 +14,7 @@ services:
     env_file:
       - .env
     environment:
-      - NODE_ENV=${NODE_ENV:-staging}
+      - NODE_ENV=${NODE_ENV:-development}
       - PORT=${BACKEND_PORT:-4001}
       - DATABASE_HOST=${DATABASE_HOST}
       - DATABASE_PORT=${DATABASE_PORT:-5432}
