@@ -49,6 +49,10 @@ RUN echo "=== Starting Next.js build ===" && \
     (echo "ERROR: .next/standalone NOT FOUND!" && exit 1) && \
     (test -d .next/static && echo "✓ .next/static exists") || \
     (echo "WARNING: .next/static NOT FOUND!" && mkdir -p .next/static) && \
+    (test -d public && echo "✓ public directory exists") || \
+    (echo "INFO: public directory not found, creating empty directory" && mkdir -p public) && \
+    (test "$(ls -A public 2>/dev/null)" && echo "✓ public directory has content") || \
+    (echo "INFO: public directory is empty, creating placeholder" && touch public/.gitkeep) && \
     echo "=== Build verification complete ===" && \
     npm cache clean --force && \
     rm -rf /root/.npm /tmp/*
@@ -68,9 +72,8 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Create public directory and copy if exists
-RUN mkdir -p ./public
-COPY --from=builder /app/public ./public
+# Copy public directory (guaranteed to exist from builder stage)
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
 
