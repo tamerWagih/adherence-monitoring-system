@@ -359,15 +359,21 @@ curl -X POST http://adherence-server/api/adherence/events \
 
 #### 6.3 Invalid Request Body
 
+**Important:** Replace `<VALID_KEY>` and `<VALID_ID>` with actual values from workstation registration (Test 2.2).
+
 ```bash
 curl -X POST http://adherence-server/api/adherence/events \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: <VALID_KEY>" \
-  -H "X-Workstation-ID: <VALID_ID>" \
+  -H "X-API-Key: <ACTUAL_API_KEY_FROM_REGISTRATION>" \
+  -H "X-Workstation-ID: <ACTUAL_WORKSTATION_ID_FROM_REGISTRATION>" \
   -d '{"invalid_field": "value"}'
 ```
 
-**Expected:** `400 Bad Request` with validation errors
+**Expected:** 
+- If authentication is **valid** → `400 Bad Request` with validation errors
+- If authentication is **invalid** (wrong API key/ID) → `401 Unauthorized` with "Invalid API key or inactive workstation"
+
+**Note:** Guards run before validation. If the API key is invalid, you'll get 401. Only with valid authentication will invalid body data return 400.
 
 ---
 
