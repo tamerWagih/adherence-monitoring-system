@@ -1,0 +1,17 @@
+# Build outputs
+bin/
+obj/
+dist/
+*.user
+*.pdb
+*.log
+*.db
+*.zip
+# VS/IDE
+.vs/
+*.suo
+*.userprefs
+# Others
+__pycache__/
+.DS_Store
+Thumbs.db
