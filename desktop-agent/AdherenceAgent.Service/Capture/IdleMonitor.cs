@@ -71,9 +71,13 @@ public class IdleMonitor
                 _logger.LogInformation("Idle start detected after {Seconds}s", idleTime.TotalSeconds);
 
                 // Check for break detection
+                // Use idleTime.TotalMinutes instead of idleDurationMinutes (which is current idle, not total)
                 if (_breakDetector != null)
                 {
-                    await _breakDetector.CheckBreakStatusAsync(true, _idleStartUtc, idleDurationMinutes);
+                    var totalIdleMinutes = idleTime.TotalMinutes;
+                    _logger.LogDebug("Checking break detection: idleStartUtc={IdleStart}, totalIdleMinutes={TotalMinutes}", 
+                        _idleStartUtc, totalIdleMinutes);
+                    await _breakDetector.CheckBreakStatusAsync(true, _idleStartUtc, totalIdleMinutes);
                 }
             }
             else if (_isIdle && idleTime < _idleThreshold)

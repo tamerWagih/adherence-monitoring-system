@@ -49,23 +49,39 @@ public class BreakDetector
         try
         {
             var schedules = _breakScheduleCache.GetSchedules();
+            _logger.LogDebug(
+                "Break detection check: isIdle={IsIdle}, idleDurationMinutes={IdleMinutes}, schedulesCount={ScheduleCount}",
+                isIdle, idleDurationMinutes, schedules.Count);
+
             if (schedules.Count == 0)
             {
                 // No break schedules configured - nothing to detect
+                _logger.LogDebug("No break schedules configured - skipping break detection");
                 return;
             }
 
             var currentTime = DateTime.Now;
             var currentTimeOfDay = currentTime.TimeOfDay;
 
+            _logger.LogDebug(
+                "Current time: {CurrentTime}, TimeOfDay: {TimeOfDay}",
+                currentTime.ToString("yyyy-MM-dd HH:mm:ss"), currentTimeOfDay);
+
             // Check if we're currently in a scheduled break window
             var activeSchedule = FindActiveBreakSchedule(schedules, currentTimeOfDay);
 
             if (activeSchedule != null)
             {
+                _logger.LogDebug(
+                    "Active break schedule found: {ScheduleId} ({StartTime}-{EndTime})",
+                    activeSchedule.Id, activeSchedule.StartTime, activeSchedule.EndTime);
+
                 // We're in a scheduled break window
                 if (isIdle && idleDurationMinutes >= MinIdleMinutesForBreak && !_isOnBreak)
                 {
+                    _logger.LogInformation(
+                        "Break start conditions met: idle={IsIdle}, duration={Duration}min (min={Min}min), onBreak={OnBreak}",
+                        isIdle, idleDurationMinutes, MinIdleMinutesForBreak, _isOnBreak);
                     // Break started: user is idle during break window
                     await StartBreakAsync(activeSchedule, idleStartUtc ?? DateTime.UtcNow);
                 }
@@ -74,9 +90,16 @@ public class BreakDetector
                     // Break ended: user resumed activity during break window
                     await EndBreakAsync(activeSchedule);
                 }
+                else
+                {
+                    _logger.LogDebug(
+                        "Break start conditions not met: idle={IsIdle}, duration={Duration}min (need {Min}min), onBreak={OnBreak}",
+                        isIdle, idleDurationMinutes, MinIdleMinutesForBreak, _isOnBreak);
+                }
             }
             else
             {
+                _logger.LogDebug("No active break schedule found for current time {TimeOfDay}", currentTimeOfDay);
                 // Not in a scheduled break window
                 if (_isOnBreak)
                 {
