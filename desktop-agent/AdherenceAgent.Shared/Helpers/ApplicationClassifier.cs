@@ -88,7 +88,23 @@ public static class ApplicationClassifier
             {
                 return false; // Pattern requires name but name is null
             }
+            // Try matching as-is first
             nameMatches = MatchesPattern(name, rule.NamePattern);
+            
+            // If pattern ends with .exe but name doesn't, try appending .exe to name
+            if (!nameMatches && rule.NamePattern.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) 
+                && !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                nameMatches = MatchesPattern(name + ".exe", rule.NamePattern);
+            }
+            
+            // If name ends with .exe but pattern doesn't, try removing .exe from name
+            if (!nameMatches && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                && !rule.NamePattern.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var nameWithoutExe = name.Substring(0, name.Length - 4);
+                nameMatches = MatchesPattern(nameWithoutExe, rule.NamePattern);
+            }
         }
 
         // Check path pattern
