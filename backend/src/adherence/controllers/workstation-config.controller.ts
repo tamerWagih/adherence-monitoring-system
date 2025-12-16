@@ -3,6 +3,7 @@ import {
   Get,
   UseGuards,
   Request,
+  Query,
 } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { WorkstationAuthGuard } from '../../guards/workstation-auth.guard';
@@ -27,11 +28,14 @@ export class WorkstationConfigController {
    * Headers Required:
    * - X-API-Key: API key
    * - X-Workstation-ID: Workstation ID
+   * 
+   * Query Parameters (Optional):
+   * - nt: Windows NT account (sam_account_name) for break schedule resolution
    */
   @Get()
-  async getConfig(@Request() req: any) {
+  async getConfig(@Request() req: any, @Query('nt') nt?: string) {
     const workstationId = req.workstation.workstationId;
-    return this.configService.getWorkstationConfig(workstationId);
+    return this.configService.getWorkstationConfig(workstationId, nt);
   }
 }
 

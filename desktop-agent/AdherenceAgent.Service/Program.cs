@@ -64,13 +64,17 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IEventBuffer, SQLiteEventBuffer>();
         services.AddSingleton<ClassificationCache>(provider =>
             new ClassificationCache(provider.GetService<ILogger<ClassificationCache>>()));
+        services.AddSingleton<BreakScheduleCache>(provider =>
+            new BreakScheduleCache(provider.GetService<ILogger<BreakScheduleCache>>()));
+        services.AddSingleton<BreakDetector>();
         services.AddSingleton<LoginLogoffMonitor>();
         services.AddSingleton(provider => new IdleMonitor(
             provider.GetRequiredService<ILogger<IdleMonitor>>(),
             provider.GetRequiredService<IEventBuffer>(),
             agentConfig.IdleCheckIntervalSeconds,
             agentConfig.IdleThresholdMinutes,
-            agentConfig.IdleThresholdSeconds));
+            agentConfig.IdleThresholdSeconds,
+            provider.GetRequiredService<BreakDetector>()));
         services.AddSingleton<SessionSwitchMonitor>();
         services.AddSingleton<ActiveWindowMonitor>();
         services.AddSingleton<CredentialStore>();
@@ -78,6 +82,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddHostedService<EventCaptureService>();
         services.AddHostedService<UploadService>();
         services.AddHostedService<ConfigSyncService>();
+        services.AddHostedService<BreakTimerService>();
         services.AddHostedService<Worker>();
     })
     .Build();

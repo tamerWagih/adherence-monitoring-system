@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AdherenceAgent.Shared.Configuration;
+using AdherenceAgent.Shared.Helpers;
 using AdherenceAgent.Shared.Models;
 using AdherenceAgent.Shared.Security;
 using Microsoft.Extensions.Hosting;
@@ -35,12 +36,14 @@ public class ConfigSyncService : BackgroundService
         AgentConfig config,
         CredentialStore credentialStore,
         ClassificationCache classificationCache,
+        BreakScheduleCache breakScheduleCache,
         IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
         _config = config;
         _credentialStore = credentialStore;
         _classificationCache = classificationCache;
+        _breakScheduleCache = breakScheduleCache;
         _httpClientFactory = httpClientFactory;
         _syncInterval = TimeSpan.FromHours(1); // Sync every hour by default
     }
@@ -121,7 +124,13 @@ public class ConfigSyncService : BackgroundService
             var client = _httpClientFactory.CreateClient("adherence");
             client.BaseAddress ??= new Uri(_config.ApiEndpoint.TrimEnd('/') + "/");
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, "adherence/workstation/config");
+            // Include NT account in query parameter for break schedule resolution
+            var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
+            var configUrl = string.IsNullOrWhiteSpace(ntAccount)
+                ? "adherence/workstation/config"
+                : $"adherence/workstation/config?nt={Uri.EscapeDataString(ntAccount)}";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, configUrl);
             request.Headers.Add("X-API-Key", _apiKey);
             request.Headers.Add("X-Workstation-ID", _workstationId);
 
@@ -143,6 +152,19 @@ public class ConfigSyncService : BackgroundService
                 else
                 {
                     _logger.LogWarning("Configuration sync returned empty classifications");
+                }
+
+                // Cache break schedules if available
+                if (configData?.BreakSchedules != null)
+                {
+                    _breakScheduleCache.SaveSchedules(configData.BreakSchedules);
+                    _logger.LogInformation(
+                        "Loaded {Count} break schedules.",
+                        configData.BreakSchedules.Count);
+                }
+                else
+                {
+                    _logger.LogDebug("No break schedules in configuration response");
                 }
             }
             else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
@@ -187,6 +209,6 @@ public class ConfigSyncService : BackgroundService
         public List<ApplicationClassification>? ApplicationClassifications { get; set; }
 
         [System.Text.Json.Serialization.JsonPropertyName("break_schedules")]
-        public List<object>? BreakSchedules { get; set; }
+        public List<BreakSchedule>? BreakSchedules { get; set; }
     }
 }

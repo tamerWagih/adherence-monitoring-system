@@ -6,6 +6,7 @@ import { AgentAdherenceException } from '../entities/agent-adherence-exception.e
 import { AgentWorkstationConfiguration } from '../entities/agent-workstation-configuration.entity';
 import { ApplicationClassification } from '../entities/application-classification.entity';
 import { EmployeePersonalInfo } from '../entities/employee-personal-info.entity';
+import { AgentSchedule } from '../entities/agent-schedule.entity';
 import { EventsController } from './controllers/events.controller';
 import { WorkstationConfigController } from './controllers/workstation-config.controller';
 import { EventIngestionService } from './services/event-ingestion.service';
@@ -34,6 +35,7 @@ import { WorkstationAuthService } from './services/workstation-auth.service';
       AgentWorkstationConfiguration,
       ApplicationClassification,
       EmployeePersonalInfo, // For NT account resolution
+      AgentSchedule, // For break schedule queries
     ]),
   ],
   controllers: [EventsController, WorkstationConfigController],

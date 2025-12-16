@@ -13,16 +13,24 @@ public class IdleMonitor
 {
     private readonly ILogger<IdleMonitor> _logger;
     private readonly IEventBuffer _buffer;
+    private readonly BreakDetector? _breakDetector;
     private readonly TimeSpan _pollInterval;
     private readonly TimeSpan _idleThreshold;
     private Timer? _timer;
     private bool _isIdle;
     private DateTime? _idleStartUtc;
 
-    public IdleMonitor(ILogger<IdleMonitor> logger, IEventBuffer buffer, int pollSeconds, int idleThresholdMinutes, int idleThresholdSecondsOverride = 0)
+    public IdleMonitor(
+        ILogger<IdleMonitor> logger,
+        IEventBuffer buffer,
+        int pollSeconds,
+        int idleThresholdMinutes,
+        int idleThresholdSecondsOverride = 0,
+        BreakDetector? breakDetector = null)
     {
         _logger = logger;
         _buffer = buffer;
+        _breakDetector = breakDetector;
         _pollInterval = TimeSpan.FromSeconds(Math.Max(5, pollSeconds));
         _idleThreshold = idleThresholdSecondsOverride > 0
             ? TimeSpan.FromSeconds(Math.Max(1, idleThresholdSecondsOverride))
@@ -45,6 +53,9 @@ public class IdleMonitor
         try
         {
             var idleTime = GetIdleTime();
+            var idleDurationMinutes = idleTime.TotalMinutes;
+            var wasIdle = _isIdle;
+
             if (!_isIdle && idleTime >= _idleThreshold)
             {
                 _isIdle = true;
@@ -58,11 +69,18 @@ public class IdleMonitor
                     Metadata = new Dictionary<string, object> { { "idle_seconds", (int)idleTime.TotalSeconds } }
                 }, token);
                 _logger.LogInformation("Idle start detected after {Seconds}s", idleTime.TotalSeconds);
+
+                // Check for break detection
+                if (_breakDetector != null)
+                {
+                    await _breakDetector.CheckBreakStatusAsync(true, _idleStartUtc, idleDurationMinutes);
+                }
             }
             else if (_isIdle && idleTime < _idleThreshold)
             {
                 _isIdle = false;
                 var totalIdle = _idleStartUtc.HasValue ? (DateTime.UtcNow - _idleStartUtc.Value) : idleTime;
+                var totalIdleMinutes = totalIdle.TotalMinutes;
                 _idleStartUtc = null;
                 var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
                 await _buffer.AddAsync(new AdherenceEvent
@@ -77,6 +95,18 @@ public class IdleMonitor
                     }
                 }, token);
                 _logger.LogInformation("Idle end detected after {Seconds}s (session {SessionSeconds}s)", idleTime.TotalSeconds, totalIdle.TotalSeconds);
+
+                // Check for break detection
+                if (_breakDetector != null)
+                {
+                    await _breakDetector.CheckBreakStatusAsync(false, null, 0);
+                }
+            }
+            else if (_isIdle && _breakDetector != null)
+            {
+                // Continue checking break status while idle (in case break window starts)
+                var totalIdle = _idleStartUtc.HasValue ? (DateTime.UtcNow - _idleStartUtc.Value) : idleTime;
+                await _breakDetector.CheckBreakStatusAsync(true, _idleStartUtc, totalIdle.TotalMinutes);
             }
         }
         catch (Exception ex)
