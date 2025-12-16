@@ -5,9 +5,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AdherenceAgent.Shared.Configuration;
+using AdherenceAgent.Shared.Helpers;
 using AdherenceAgent.Shared.Models;
 using AdherenceAgent.Shared.Storage;
-using AdherenceAgent.Shared.Helpers;
 using Microsoft.Extensions.Logging;
 
 namespace AdherenceAgent.Service.Capture;
@@ -19,6 +19,7 @@ public class ActiveWindowMonitor
 {
     private readonly ILogger<ActiveWindowMonitor> _logger;
     private readonly IEventBuffer _buffer;
+    private readonly ClassificationCache _classificationCache;
     private readonly TimeSpan _pollInterval;
     private Timer? _timer;
     private IntPtr _lastHandle = IntPtr.Zero;
@@ -37,10 +38,15 @@ public class ActiveWindowMonitor
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-    public ActiveWindowMonitor(ILogger<ActiveWindowMonitor> logger, IEventBuffer buffer, AgentConfig config)
+    public ActiveWindowMonitor(
+        ILogger<ActiveWindowMonitor> logger,
+        IEventBuffer buffer,
+        AgentConfig config,
+        ClassificationCache classificationCache)
     {
         _logger = logger;
         _buffer = buffer;
+        _classificationCache = classificationCache;
         _pollInterval = TimeSpan.FromSeconds(Math.Max(2, config.WindowCheckIntervalSeconds));
     }
 
@@ -81,6 +87,14 @@ public class ActiveWindowMonitor
             _lastWindowTitle = title;
             _lastProcessPath = procPath;
 
+            // Classify application
+            var classifications = _classificationCache.GetClassifications();
+            var isWorkApplication = ApplicationClassifier.ClassifyApplication(
+                procName,
+                procPath,
+                title,
+                classifications);
+
             var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
             var evt = new AdherenceEvent
             {
@@ -90,7 +104,7 @@ public class ActiveWindowMonitor
                 ApplicationName = procName,
                 ApplicationPath = procPath,
                 WindowTitle = title,
-                IsWorkApplication = null,
+                IsWorkApplication = isWorkApplication,
                 Metadata = new Dictionary<string, object>
                 {
                     { "process_name", procName ?? string.Empty },

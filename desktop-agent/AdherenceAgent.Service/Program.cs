@@ -1,5 +1,6 @@
 using AdherenceAgent.Service;
 using AdherenceAgent.Service.Capture;
+using AdherenceAgent.Service.Sync;
 using AdherenceAgent.Service.Upload;
 using AdherenceAgent.Shared.Configuration;
 using AdherenceAgent.Shared.Security;
@@ -61,6 +62,8 @@ var host = Host.CreateDefaultBuilder(args)
         var agentConfig = context.Configuration.GetSection("Agent").Get<AgentConfig>() ?? new AgentConfig();
         services.AddSingleton(agentConfig);
         services.AddSingleton<IEventBuffer, SQLiteEventBuffer>();
+        services.AddSingleton<ClassificationCache>(provider =>
+            new ClassificationCache(provider.GetService<ILogger<ClassificationCache>>()));
         services.AddSingleton<LoginLogoffMonitor>();
         services.AddSingleton(provider => new IdleMonitor(
             provider.GetRequiredService<ILogger<IdleMonitor>>(),
@@ -74,6 +77,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddHttpClient("adherence");
         services.AddHostedService<EventCaptureService>();
         services.AddHostedService<UploadService>();
+        services.AddHostedService<ConfigSyncService>();
         services.AddHostedService<Worker>();
     })
     .Build();
