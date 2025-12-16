@@ -62,14 +62,13 @@ export class WorkstationConfigService {
 
         if (personalInfo?.employeeId) {
           // Query break schedules for today
-          // Use raw SQL to set timezone and get today's date explicitly
-          // This ensures we always use Egypt timezone (+02:00) regardless of connection settings
+          // Calculate today's date in Egypt timezone (+02:00) explicitly
+          // This ensures we always use Egypt timezone regardless of connection settings
           const result = await this.agentScheduleRepo.query(
             `
-            SET LOCAL timezone = '+02:00';
             SELECT * FROM agent_schedules
             WHERE employee_id = $1
-              AND schedule_date = CURRENT_DATE
+              AND schedule_date = (NOW() AT TIME ZONE 'UTC' AT TIME ZONE '+02:00')::date
               AND is_break = $2
               AND is_confirmed = $3
             ORDER BY shift_start ASC
@@ -100,8 +99,12 @@ export class WorkstationConfigService {
               );
             });
           } else {
+            // Log what date we're looking for
+            const dateCheck = await this.agentScheduleRepo.query(
+              `SELECT (NOW() AT TIME ZONE 'UTC' AT TIME ZONE '+02:00')::date as today_date`,
+            );
             console.log(
-              `[BreakSchedule] No schedules found. Current date check: SELECT CURRENT_DATE;`,
+              `[BreakSchedule] No schedules found. Looking for date: ${dateCheck[0]?.today_date}`,
             );
           }
 
