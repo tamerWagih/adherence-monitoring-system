@@ -61,20 +61,49 @@ export class WorkstationConfigService {
         });
 
         if (personalInfo?.employeeId) {
-          // Query break schedules for today using PostgreSQL CURRENT_DATE
-          // Use Raw() to ensure CURRENT_DATE is treated as a SQL function, not a string literal
-          // CURRENT_DATE uses the database server's timezone (now set to +02:00 for Egypt)
-          const schedules = await this.agentScheduleRepo.find({
-            where: {
-              employeeId: personalInfo.employeeId,
-              scheduleDate: Raw((alias) => `${alias} = CURRENT_DATE`),
-              isBreak: true,
-              isConfirmed: true,
-            },
-            order: {
-              shiftStart: 'ASC',
-            },
-          });
+          // Query break schedules for today
+          // Use raw SQL to set timezone and get today's date explicitly
+          // This ensures we always use Egypt timezone (+02:00) regardless of connection settings
+          const result = await this.agentScheduleRepo.query(
+            `
+            SET LOCAL timezone = '+02:00';
+            SELECT * FROM agent_schedules
+            WHERE employee_id = $1
+              AND schedule_date = CURRENT_DATE
+              AND is_break = $2
+              AND is_confirmed = $3
+            ORDER BY shift_start ASC
+            `,
+            [personalInfo.employeeId, true, true],
+          );
+
+          // Convert raw results to entity objects
+          const schedules = result.map((row: any) => ({
+            id: row.id,
+            employeeId: row.employee_id,
+            scheduleDate: row.schedule_date,
+            shiftStart: row.shift_start,
+            shiftEnd: row.shift_end,
+            isBreak: row.is_break,
+            breakDuration: row.break_duration,
+            isConfirmed: row.is_confirmed,
+          }));
+
+          // Debug logging
+          console.log(
+            `[BreakSchedule] Query for employee ${personalInfo.employeeId}: Found ${schedules.length} schedules`,
+          );
+          if (schedules.length > 0) {
+            schedules.forEach((s) => {
+              console.log(
+                `  - Schedule ${s.id}: date=${s.scheduleDate}, start=${s.shiftStart}, end=${s.shiftEnd}`,
+              );
+            });
+          } else {
+            console.log(
+              `[BreakSchedule] No schedules found. Current date check: SELECT CURRENT_DATE;`,
+            );
+          }
 
           // Convert to break schedule format
           breakSchedules = schedules.map((schedule) => {
