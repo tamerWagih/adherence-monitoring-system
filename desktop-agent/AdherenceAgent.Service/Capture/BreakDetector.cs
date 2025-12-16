@@ -49,15 +49,22 @@ public class BreakDetector
         try
         {
             var schedules = _breakScheduleCache.GetSchedules();
-            _logger.LogDebug(
+            _logger.LogInformation(
                 "Break detection check: isIdle={IsIdle}, idleDurationMinutes={IdleMinutes}, schedulesCount={ScheduleCount}",
                 isIdle, idleDurationMinutes, schedules.Count);
 
             if (schedules.Count == 0)
             {
                 // No break schedules configured - nothing to detect
-                _logger.LogDebug("No break schedules configured - skipping break detection");
+                _logger.LogWarning("No break schedules configured - skipping break detection. Check if break_schedules.json exists and contains schedules.");
                 return;
+            }
+
+            // Log all schedules for debugging
+            foreach (var s in schedules)
+            {
+                _logger.LogDebug("Cached schedule: {ScheduleId} ({StartTime}-{EndTime}, {Duration}min)", 
+                    s.Id, s.StartTime, s.EndTime, s.BreakDurationMinutes);
             }
 
             var currentTime = DateTime.Now;
@@ -119,19 +126,34 @@ public class BreakDetector
     /// </summary>
     private BreakSchedule? FindActiveBreakSchedule(List<BreakSchedule> schedules, TimeSpan currentTime)
     {
+        _logger.LogDebug("Checking {Count} schedules against current time {CurrentTime}", schedules.Count, currentTime);
+        
         foreach (var schedule in schedules)
         {
             if (TryParseTime(schedule.StartTime, out var startTime) &&
                 TryParseTime(schedule.EndTime, out var endTime))
             {
+                _logger.LogDebug(
+                    "Checking schedule {ScheduleId}: {StartTime}-{EndTime}, current={CurrentTime} (startOk={StartOk}, endOk={EndOk})",
+                    schedule.Id, startTime, endTime, currentTime, 
+                    currentTime >= startTime, currentTime <= endTime);
+                
                 // Check if current time is within break window
                 if (currentTime >= startTime && currentTime <= endTime)
                 {
+                    _logger.LogInformation("Schedule {ScheduleId} matches current time {CurrentTime}", schedule.Id, currentTime);
                     return schedule;
                 }
             }
+            else
+            {
+                _logger.LogWarning(
+                    "Failed to parse schedule {ScheduleId} times: Start={StartTime}, End={EndTime}",
+                    schedule.Id, schedule.StartTime, schedule.EndTime);
+            }
         }
 
+        _logger.LogDebug("No matching schedule found for current time {CurrentTime}", currentTime);
         return null;
     }
 
