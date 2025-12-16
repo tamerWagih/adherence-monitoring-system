@@ -25,6 +25,7 @@ public class ConfigSyncService : BackgroundService
     private readonly AgentConfig _config;
     private readonly CredentialStore _credentialStore;
     private readonly ClassificationCache _classificationCache;
+    private readonly BreakScheduleCache _breakScheduleCache;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TimeSpan _syncInterval;
 
