@@ -62,21 +62,19 @@ export class WorkstationConfigService {
 
         if (personalInfo?.employeeId) {
           // Query break schedules for today using PostgreSQL CURRENT_DATE
-          // This uses the database server's timezone, which should match the agent's timezone
-          // If database is in UTC, we need to use timezone conversion
-          // For Egypt time (UTC+2), we'll use CURRENT_DATE which should be set to the correct timezone
-          const schedules = await this.agentScheduleRepo
-            .createQueryBuilder('schedule')
-            .where('schedule.employee_id = :employeeId', {
+          // Use Raw() to ensure CURRENT_DATE is treated as a SQL function, not a string literal
+          // CURRENT_DATE uses the database server's timezone (now set to +02:00 for Egypt)
+          const schedules = await this.agentScheduleRepo.find({
+            where: {
               employeeId: personalInfo.employeeId,
-            })
-            .andWhere('schedule.schedule_date = CURRENT_DATE')
-            .andWhere('schedule.is_break = :isBreak', { isBreak: true })
-            .andWhere('schedule.is_confirmed = :isConfirmed', {
+              scheduleDate: Raw((alias) => `${alias} = CURRENT_DATE`),
+              isBreak: true,
               isConfirmed: true,
-            })
-            .orderBy('schedule.shift_start', 'ASC')
-            .getMany();
+            },
+            order: {
+              shiftStart: 'ASC',
+            },
+          });
 
           // Convert to break schedule format
           breakSchedules = schedules.map((schedule) => {
