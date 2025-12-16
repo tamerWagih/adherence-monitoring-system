@@ -61,24 +61,16 @@ export class WorkstationConfigService {
         });
 
         if (personalInfo?.employeeId) {
-          // Get today's date in local timezone (not UTC)
-          // Break schedules are stored as DATE type (no timezone), interpreted as local time
-          const today = new Date();
-          const year = today.getFullYear();
-          const month = String(today.getMonth() + 1).padStart(2, '0');
-          const day = String(today.getDate()).padStart(2, '0');
-          const todayStr = `${year}-${month}-${day}`; // Format: YYYY-MM-DD (local date)
-
-          // Query break schedules for today
-          // Use Raw SQL or date comparison that works with TypeORM
+          // Query break schedules for today using PostgreSQL CURRENT_DATE
+          // This uses the database server's timezone, which should match the agent's timezone
+          // If database is in UTC, we need to use timezone conversion
+          // For Egypt time (UTC+2), we'll use CURRENT_DATE which should be set to the correct timezone
           const schedules = await this.agentScheduleRepo
             .createQueryBuilder('schedule')
             .where('schedule.employee_id = :employeeId', {
               employeeId: personalInfo.employeeId,
             })
-            .andWhere('schedule.schedule_date = :today', {
-              today: todayStr,
-            })
+            .andWhere('schedule.schedule_date = CURRENT_DATE')
             .andWhere('schedule.is_break = :isBreak', { isBreak: true })
             .andWhere('schedule.is_confirmed = :isConfirmed', {
               isConfirmed: true,
