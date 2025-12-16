@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Raw } from 'typeorm';
 import { ApplicationClassification } from '../../entities/application-classification.entity';
 import { AgentWorkstationConfiguration } from '../../entities/agent-workstation-configuration.entity';
 import { EmployeePersonalInfo } from '../../entities/employee-personal-info.entity';
