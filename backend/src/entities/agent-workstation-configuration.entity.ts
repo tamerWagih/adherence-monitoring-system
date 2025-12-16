@@ -20,11 +20,11 @@ export class AgentWorkstationConfiguration {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'workstation_id', type: 'uuid', unique: true })
+  @Column({ name: 'workstation_id', type: 'varchar', length: 100, unique: true })
   workstationId: string;
 
-  @Column({ name: 'employee_id', type: 'uuid' })
-  employeeId: string;
+  @Column({ name: 'employee_id', type: 'uuid', nullable: true })
+  employeeId?: string; // Optional (legacy). Workstations are device-only, employee resolution happens via NT at event ingestion
 
   @Column({ name: 'api_key_hash', type: 'varchar', length: 255 })
   apiKeyHash: string; // bcrypt hash of API key

@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Diagnostics.Eventing.Reader;
+using System.Xml;
 using AdherenceAgent.Shared.Models;
 using AdherenceAgent.Shared.Storage;
+using AdherenceAgent.Shared.Helpers;
 using Microsoft.Extensions.Logging;
 
 namespace AdherenceAgent.Service.Capture;
@@ -70,10 +72,21 @@ public class LoginLogoffMonitor
 
         try
         {
+            // Extract NT account from Security Event Log
+            var ntAccount = ExtractNtAccountFromEvent(record);
+            
+            // Fallback to current session if extraction fails
+            if (string.IsNullOrEmpty(ntAccount))
+            {
+                ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
+                _logger.LogWarning("Could not extract NT account from Security Event Log, using current session: {NtAccount}", ntAccount);
+            }
+
             await _buffer.AddAsync(new AdherenceEvent
             {
                 EventType = eventType,
                 EventTimestampUtc = record.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow,
+                NtAccount = ntAccount,
                 Metadata = new Dictionary<string, object>
                 {
                     { "event_id", record.Id },
@@ -87,12 +100,63 @@ public class LoginLogoffMonitor
         }
     }
 
+    /// <summary>
+    /// Extracts NT account (sam_account_name) from Security Event Log record.
+    /// Looks for TargetUserName or SubjectUserName in event XML data.
+    /// </summary>
+    private string ExtractNtAccountFromEvent(EventRecord record)
+    {
+        try
+        {
+            // Get event XML
+            var xml = record.ToXml();
+            if (string.IsNullOrEmpty(xml))
+            {
+                return string.Empty;
+            }
+
+            var doc = new XmlDocument();
+            doc.LoadXml(xml);
+
+            // Security events typically have TargetUserName or SubjectUserName in EventData
+            var nsManager = new XmlNamespaceManager(doc.NameTable);
+            nsManager.AddNamespace("ns", "http://schemas.microsoft.com/win/2004/08/events/event");
+
+            // Try TargetUserName first (for logon events)
+            var targetUserName = doc.SelectSingleNode("//ns:EventData/ns:Data[@Name='TargetUserName']", nsManager);
+            if (targetUserName != null && !string.IsNullOrEmpty(targetUserName.InnerText))
+            {
+                return WindowsIdentityHelper.ExtractSamAccountName(targetUserName.InnerText);
+            }
+
+            // Try SubjectUserName (for logoff events)
+            var subjectUserName = doc.SelectSingleNode("//ns:EventData/ns:Data[@Name='SubjectUserName']", nsManager);
+            if (subjectUserName != null && !string.IsNullOrEmpty(subjectUserName.InnerText))
+            {
+                return WindowsIdentityHelper.ExtractSamAccountName(subjectUserName.InnerText);
+            }
+
+            // Try TargetUserSid and resolve to username (more complex, fallback)
+            // For now, return empty and let fallback handle it
+            return string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to extract NT account from Security Event Log");
+            return string.Empty;
+        }
+    }
+
     private async Task EmitStartupLoginAsync(CancellationToken token)
     {
+        // Get NT account from current session
+        var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
+        
         await _buffer.AddAsync(new AdherenceEvent
         {
             EventType = EventTypes.Login,
             EventTimestampUtc = DateTime.UtcNow,
+            NtAccount = ntAccount,
             Metadata = new Dictionary<string, object>
             {
                 { "note", "startup_fallback" },

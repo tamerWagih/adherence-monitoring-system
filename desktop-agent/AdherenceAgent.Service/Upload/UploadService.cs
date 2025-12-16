@@ -92,10 +92,20 @@ public class UploadService : BackgroundService
                 }
                 else
                 {
-                    await _buffer.MarkFailedAsync(pending.Where(e => e.Id.HasValue).Select(e => e.Id!.Value), "upload_failed", stoppingToken);
+                    // For 409 Conflict (unmapped NT), mark as failed permanently (don't retry)
+                    var failedEvents = pending.Where(e => e.Id.HasValue).Select(e => e.Id!.Value);
+                    var errorMessage = result.StatusCode == HttpStatusCode.Conflict 
+                        ? "unmapped_nt_account" 
+                        : "upload_failed";
+                    await _buffer.MarkFailedAsync(failedEvents, errorMessage, stoppingToken);
                     _successStreak = 0;
-                    // Adjust rate on throttle/health
-                    if (result.IsRateLimited)
+                    
+                    // Adjust rate on throttle/health (but not for 409 Conflict)
+                    if (result.StatusCode == HttpStatusCode.Conflict)
+                    {
+                        _logger.LogWarning("Events marked as failed due to unmapped NT account. Contact admin to register NT account in employee_personal_info.");
+                    }
+                    else if (result.IsRateLimited)
                     {
                         _currentBatchSize = Math.Max(10, _currentBatchSize / 2);
                         _currentIntervalSeconds = Math.Min(300, _currentIntervalSeconds * 2);
@@ -147,12 +157,27 @@ public class UploadService : BackgroundService
         // Ensure trailing slash so relative path combines to /api/adherence/events
         client.BaseAddress ??= new Uri(_config.ApiEndpoint.TrimEnd('/') + "/");
 
+        // Validate all events have NT account before uploading
+        var eventsWithoutNt = events.Where(e => string.IsNullOrWhiteSpace(e.NtAccount)).ToList();
+        if (eventsWithoutNt.Any())
+        {
+            _logger.LogWarning("Skipping {Count} events without NT account", eventsWithoutNt.Count);
+            // Filter out events without NT from batch
+            var validEvents = events.Where(e => !string.IsNullOrWhiteSpace(e.NtAccount)).ToList();
+            if (validEvents.Count == 0)
+            {
+                return UploadResult.Failed(null);
+            }
+            events = validEvents;
+        }
+
         var payload = new
         {
             events = events.Select(e => new
             {
                 event_type = e.EventType,
                 event_timestamp = e.EventTimestampUtc,
+                nt = e.NtAccount,
                 application_name = e.ApplicationName,
                 application_path = e.ApplicationPath,
                 window_title = e.WindowTitle,
@@ -180,6 +205,15 @@ public class UploadService : BackgroundService
                 {
                     _logger.LogInformation("Uploaded {Count} events.", events.Count);
                     return UploadResult.SuccessResult();
+                }
+
+                // Handle 409 Conflict (unmapped NT account) - don't retry, mark as failed
+                if (response.StatusCode == HttpStatusCode.Conflict)
+                {
+                    var responseBody = await response.Content.ReadAsStringAsync(token);
+                    _logger.LogWarning("Upload rejected - unmapped NT account (409 Conflict). Response: {Response}", responseBody);
+                    // Mark events as failed permanently (don't retry unmapped NT)
+                    return UploadResult.Failed(response.StatusCode);
                 }
 
                 if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable)

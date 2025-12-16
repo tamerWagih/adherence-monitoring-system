@@ -12,6 +12,9 @@ import { WorkstationAuthService } from '../adherence/services/workstation-auth.s
  * Validates API key and workstation ID from request headers.
  * Used for Desktop Agent authentication.
  * 
+ * Note: Workstation authentication is device-only. Employee resolution
+ * happens at event ingestion time via NT account (sam_account_name).
+ * 
  * Required Headers:
  * - X-API-Key: 43-character API key
  * - X-Workstation-ID: UUID workstation ID
@@ -46,8 +49,8 @@ export class WorkstationAuthGuard implements CanActivate {
     }
 
     // Attach workstation info to request for use in controllers
+    // Note: Workstation is device-only, no employee binding
     request.workstation = workstation;
-    request.employeeId = workstation.employeeId;
 
     // Update last_seen_at timestamp
     await this.workstationAuthService.updateLastSeen(workstationId);

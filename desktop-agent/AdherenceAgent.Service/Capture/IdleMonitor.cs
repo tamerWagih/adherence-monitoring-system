@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using AdherenceAgent.Shared.Models;
 using AdherenceAgent.Shared.Storage;
+using AdherenceAgent.Shared.Helpers;
 using Microsoft.Extensions.Logging;
 
 namespace AdherenceAgent.Service.Capture;
@@ -48,10 +49,12 @@ public class IdleMonitor
             {
                 _isIdle = true;
                 _idleStartUtc = DateTime.UtcNow - idleTime;
+                var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
                 await _buffer.AddAsync(new AdherenceEvent
                 {
                     EventType = EventTypes.IdleStart,
                     EventTimestampUtc = DateTime.UtcNow,
+                    NtAccount = ntAccount,
                     Metadata = new Dictionary<string, object> { { "idle_seconds", (int)idleTime.TotalSeconds } }
                 }, token);
                 _logger.LogInformation("Idle start detected after {Seconds}s", idleTime.TotalSeconds);
@@ -61,10 +64,12 @@ public class IdleMonitor
                 _isIdle = false;
                 var totalIdle = _idleStartUtc.HasValue ? (DateTime.UtcNow - _idleStartUtc.Value) : idleTime;
                 _idleStartUtc = null;
+                var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
                 await _buffer.AddAsync(new AdherenceEvent
                 {
                     EventType = EventTypes.IdleEnd,
                     EventTimestampUtc = DateTime.UtcNow,
+                    NtAccount = ntAccount,
                     Metadata = new Dictionary<string, object>
                     {
                         { "idle_seconds", (int)idleTime.TotalSeconds },

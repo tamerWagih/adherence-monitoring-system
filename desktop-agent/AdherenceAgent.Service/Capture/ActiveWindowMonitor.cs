@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using AdherenceAgent.Shared.Configuration;
 using AdherenceAgent.Shared.Models;
 using AdherenceAgent.Shared.Storage;
+using AdherenceAgent.Shared.Helpers;
 using Microsoft.Extensions.Logging;
 
 namespace AdherenceAgent.Service.Capture;
@@ -80,10 +81,12 @@ public class ActiveWindowMonitor
             _lastWindowTitle = title;
             _lastProcessPath = procPath;
 
+            var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
             var evt = new AdherenceEvent
             {
                 EventType = EventTypes.WindowChange,
                 EventTimestampUtc = DateTime.UtcNow,
+                NtAccount = ntAccount,
                 ApplicationName = procName,
                 ApplicationPath = procPath,
                 WindowTitle = title,

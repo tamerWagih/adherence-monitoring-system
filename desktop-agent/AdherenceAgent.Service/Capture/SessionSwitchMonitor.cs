@@ -1,5 +1,6 @@
 using AdherenceAgent.Shared.Models;
 using AdherenceAgent.Shared.Storage;
+using AdherenceAgent.Shared.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 
@@ -42,10 +43,12 @@ public class SessionSwitchMonitor
             switch (e.Reason)
             {
                 case SessionSwitchReason.SessionLock:
+                    var lockNtAccount = WindowsIdentityHelper.GetCurrentNtAccount();
                     await _buffer.AddAsync(new AdherenceEvent
                     {
                         EventType = EventTypes.Logoff,
                         EventTimestampUtc = DateTime.UtcNow,
+                        NtAccount = lockNtAccount,
                         Metadata = new Dictionary<string, object>
                         {
                             { "source", "session_switch" },
@@ -56,10 +59,12 @@ public class SessionSwitchMonitor
                     _logger.LogInformation("Session lock detected via SessionSwitch.");
                     break;
                 case SessionSwitchReason.SessionUnlock:
+                    var unlockNtAccount = WindowsIdentityHelper.GetCurrentNtAccount();
                     await _buffer.AddAsync(new AdherenceEvent
                     {
                         EventType = EventTypes.Login,
                         EventTimestampUtc = DateTime.UtcNow,
+                        NtAccount = unlockNtAccount,
                         Metadata = new Dictionary<string, object>
                         {
                             { "source", "session_switch" },

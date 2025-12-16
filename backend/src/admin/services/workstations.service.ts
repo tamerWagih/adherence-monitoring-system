@@ -105,58 +105,20 @@ export class WorkstationsService {
 
   /**
    * Register a new workstation
+   * 
+   * Workstation registration is now device-only.
+   * Employee resolution happens at event ingestion time via NT account (sam_account_name).
    */
   async registerWorkstation(dto: RegisterWorkstationDto) {
-    // Validate that employee exists and is active in employees table
-    // Use explicit UUID casting to handle any format issues
-    const employee = await this.dataSource.query(
-      'SELECT id, status FROM employees WHERE id = $1::uuid',
-      [dto.employee_id],
-    );
-
-    if (!employee || employee.length === 0) {
-      // Try to get some sample employee IDs for debugging
-      const sampleEmployees = await this.dataSource.query(
-        'SELECT id::text as id, status FROM employees WHERE status = $1 LIMIT 3',
-        ['Active'],
-      );
-      
-      throw new BadRequestException(
-        `Employee with ID ${dto.employee_id} does not exist in the employees table.` +
-        (sampleEmployees.length > 0 
-          ? ` Sample active employee IDs: ${sampleEmployees.map(e => e.id).join(', ')}`
-          : ' No active employees found in database.'),
-      );
-    }
-
-    // Check if employee is active
-    if (employee[0].status !== 'Active') {
-      throw new BadRequestException(
-        `Cannot register workstation for employee with ID ${dto.employee_id}. ` +
-        `Employee status is '${employee[0].status}'. Only active employees can have workstations registered.`,
-      );
-    }
-
-    // Check if employee already has an active workstation
-    const existing = await this.workstationRepo.findOne({
-      where: { employeeId: dto.employee_id, isActive: true },
-    });
-
-    if (existing) {
-      throw new ConflictException(
-        'Employee already has an active workstation. Revoke existing one first.',
-      );
-    }
-
     // Generate credentials
     const workstationId = randomUUID();
     const apiKey = this.workstationAuthService.generateApiKey();
     const apiKeyHash = await this.workstationAuthService.hashApiKey(apiKey);
 
-    // Create workstation
+    // Create workstation (device-only, no employee binding)
     const workstation = this.workstationRepo.create({
       workstationId,
-      employeeId: dto.employee_id,
+      employeeId: undefined, // Device-only registration
       apiKeyHash,
       workstationName: dto.workstation_name,
       osVersion: dto.os_version,
@@ -173,6 +135,7 @@ export class WorkstationsService {
       api_key: apiKey, // Plain text - shown once only
       message: 'Workstation registered successfully',
       warning: 'These credentials will not be shown again. Store them securely.',
+      note: 'This workstation is device-only. Employee identification happens via NT account at event ingestion.',
     };
   }
 

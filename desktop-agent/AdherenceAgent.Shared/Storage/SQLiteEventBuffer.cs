@@ -48,6 +48,7 @@ public class SQLiteEventBuffer : IEventBuffer
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_type TEXT NOT NULL,
                 event_timestamp TEXT NOT NULL,
+                nt_account TEXT NOT NULL,
                 application_name TEXT,
                 application_path TEXT,
                 window_title TEXT,
@@ -64,6 +65,32 @@ public class SQLiteEventBuffer : IEventBuffer
 
         using var command = new SQLiteCommand(sql, connection);
         await command.ExecuteNonQueryAsync(cancellationToken);
+
+        // Migration: Add nt_account column if it doesn't exist (for existing databases)
+        // SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN directly
+        // So we check using PRAGMA table_info
+        var pragmaCmd = connection.CreateCommand();
+        pragmaCmd.CommandText = "PRAGMA table_info(event_buffer);";
+        using var pragmaReader = await pragmaCmd.ExecuteReaderAsync(cancellationToken);
+        bool hasNtAccount = false;
+        while (await pragmaReader.ReadAsync(cancellationToken))
+        {
+            var columnName = pragmaReader.GetString(1);
+            if (columnName == "nt_account")
+            {
+                hasNtAccount = true;
+                break;
+            }
+        }
+        pragmaReader.Close();
+
+        if (!hasNtAccount)
+        {
+            var alterCmd = connection.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE event_buffer ADD COLUMN nt_account TEXT NOT NULL DEFAULT '';";
+            await alterCmd.ExecuteNonQueryAsync(cancellationToken);
+            _logger.LogInformation("Added nt_account column to event_buffer table (migration)");
+        }
     }
 
     public async Task AddAsync(AdherenceEvent adherenceEvent, CancellationToken cancellationToken)
@@ -76,11 +103,12 @@ public class SQLiteEventBuffer : IEventBuffer
         var cmd = connection.CreateCommand();
         cmd.CommandText = """
             INSERT INTO event_buffer
-            (event_type, event_timestamp, application_name, application_path, window_title, is_work_application, metadata, status)
-            VALUES (@type, @timestamp, @appName, @appPath, @windowTitle, @isWork, @metadata, 'PENDING');
+            (event_type, event_timestamp, nt_account, application_name, application_path, window_title, is_work_application, metadata, status)
+            VALUES (@type, @timestamp, @ntAccount, @appName, @appPath, @windowTitle, @isWork, @metadata, 'PENDING');
             """;
         cmd.Parameters.AddWithValue("@type", adherenceEvent.EventType);
         cmd.Parameters.AddWithValue("@timestamp", adherenceEvent.EventTimestampUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("@ntAccount", adherenceEvent.NtAccount ?? string.Empty);
         cmd.Parameters.AddWithValue("@appName", (object?)adherenceEvent.ApplicationName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@appPath", (object?)adherenceEvent.ApplicationPath ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@windowTitle", (object?)adherenceEvent.WindowTitle ?? DBNull.Value);
@@ -99,7 +127,7 @@ public class SQLiteEventBuffer : IEventBuffer
 
         var cmd = connection.CreateCommand();
         cmd.CommandText = """
-            SELECT id, event_type, event_timestamp, application_name, application_path, window_title, is_work_application, metadata
+            SELECT id, event_type, event_timestamp, nt_account, application_name, application_path, window_title, is_work_application, metadata
             FROM event_buffer
             WHERE status IN ('PENDING','FAILED')
               AND retry_count < @maxRetry
@@ -117,13 +145,14 @@ public class SQLiteEventBuffer : IEventBuffer
                 Id = reader.GetInt64(0),
                 EventType = reader.GetString(1),
                 EventTimestampUtc = DateTime.Parse(reader.GetString(2)),
-                ApplicationName = reader.IsDBNull(3) ? null : reader.GetString(3),
-                ApplicationPath = reader.IsDBNull(4) ? null : reader.GetString(4),
-                WindowTitle = reader.IsDBNull(5) ? null : reader.GetString(5),
-                IsWorkApplication = reader.IsDBNull(6) ? null : reader.GetInt32(6) == 1,
-                Metadata = reader.IsDBNull(7)
+                NtAccount = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                ApplicationName = reader.IsDBNull(4) ? null : reader.GetString(4),
+                ApplicationPath = reader.IsDBNull(5) ? null : reader.GetString(5),
+                WindowTitle = reader.IsDBNull(6) ? null : reader.GetString(6),
+                IsWorkApplication = reader.IsDBNull(7) ? null : reader.GetInt32(7) == 1,
+                Metadata = reader.IsDBNull(8)
                     ? null
-                    : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(reader.GetString(7))
+                    : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(reader.GetString(8))
             });
         }
 

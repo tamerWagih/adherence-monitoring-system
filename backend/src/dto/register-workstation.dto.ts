@@ -1,14 +1,16 @@
 import {
-  IsUUID,
   IsString,
   IsOptional,
   MaxLength,
 } from 'class-validator';
 
+/**
+ * RegisterWorkstationDto
+ * 
+ * Workstation registration is now device-only.
+ * Employee resolution happens at event ingestion time via NT account (sam_account_name).
+ */
 export class RegisterWorkstationDto {
-  @IsUUID()
-  employee_id: string;
-
   @IsString()
   @MaxLength(255)
   @IsOptional()

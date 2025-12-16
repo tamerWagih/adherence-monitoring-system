@@ -9,6 +9,8 @@ import {
   ValidateNested,
   IsArray,
   ValidateIf,
+  IsNotEmpty,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -40,6 +42,14 @@ export class CreateAdherenceEventDto {
   @IsISO8601()
   @ValidateIf((o) => !o.event_timestamp)
   timestamp?: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'nt field is required (Windows NT account sam_account_name)' })
+  @MaxLength(100)
+  @Matches(/^[^\\]+$/, {
+    message: 'nt must be sam_account_name only (e.g., z.salah.3613), no domain prefix',
+  })
+  nt: string; // Windows NT account (sam_account_name only, e.g., z.salah.3613)
 
   @IsString()
   @IsOptional()

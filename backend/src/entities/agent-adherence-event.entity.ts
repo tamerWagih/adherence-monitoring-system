@@ -4,8 +4,6 @@ import {
   Column,
   CreateDateColumn,
   Index,
-  ManyToOne,
-  JoinColumn,
 } from 'typeorm';
 
 /**
@@ -28,12 +26,16 @@ export class AgentAdherenceEvent {
   @PrimaryColumn({ name: 'event_timestamp', type: 'timestamptz' })
   eventTimestamp: Date;
 
-  @Column({ name: 'employee_id', type: 'uuid' })
+  @Column({ name: 'employee_id', type: 'uuid', nullable: true })
   @Index()
-  employeeId: string;
+  employeeId?: string; // Resolved from nt at ingestion time
 
-  @Column({ name: 'workstation_id', type: 'uuid', nullable: true })
+  @Column({ name: 'workstation_id', type: 'varchar', length: 100, nullable: true })
   workstationId?: string;
+
+  @Column({ name: 'nt', type: 'varchar', length: 100, nullable: true })
+  @Index('idx_events_nt_timestamp', ['nt', 'eventTimestamp'])
+  nt?: string; // Windows NT account (sam_account_name only, e.g., z.salah.3613)
 
   @Column({
     name: 'event_type',

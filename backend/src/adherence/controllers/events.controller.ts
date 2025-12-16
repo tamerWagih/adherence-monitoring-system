@@ -28,6 +28,9 @@ export class EventsController {
    * 
    * Ingest a single event or batch of events from Desktop Agent.
    * 
+   * Each event must include an 'nt' field (Windows NT account sam_account_name).
+   * Employee ID is resolved from NT account at ingestion time.
+   * 
    * Headers Required:
    * - X-API-Key: API key
    * - X-Workstation-ID: Workstation ID
@@ -38,14 +41,12 @@ export class EventsController {
     @Body() body: CreateAdherenceEventDto | BatchEventsDto,
     @Request() req: any,
   ) {
-    const employeeId = req.employeeId;
     const workstationId = req.workstation.workstationId;
 
     // Check if it's a batch request
     if ('events' in body && Array.isArray(body.events)) {
       const batchDto = body as BatchEventsDto;
       const result = await this.eventIngestionService.ingestBatchEvents(
-        employeeId,
         workstationId,
         batchDto.events,
       );
@@ -60,7 +61,6 @@ export class EventsController {
       // Single event
       const eventDto = body as CreateAdherenceEventDto;
       await this.eventIngestionService.ingestEvent(
-        employeeId,
         workstationId,
         eventDto,
       );
