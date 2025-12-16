@@ -61,9 +61,13 @@ export class WorkstationConfigService {
         });
 
         if (personalInfo?.employeeId) {
-          // Get today's date (UTC midnight for consistent comparison)
+          // Get today's date in local timezone (not UTC)
+          // Break schedules are stored as DATE type (no timezone), interpreted as local time
           const today = new Date();
-          const todayStr = today.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+          const year = today.getFullYear();
+          const month = String(today.getMonth() + 1).padStart(2, '0');
+          const day = String(today.getDate()).padStart(2, '0');
+          const todayStr = `${year}-${month}-${day}`; // Format: YYYY-MM-DD (local date)
 
           // Query break schedules for today
           // Use Raw SQL or date comparison that works with TypeORM
