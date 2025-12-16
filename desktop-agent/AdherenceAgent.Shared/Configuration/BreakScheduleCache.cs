@@ -27,6 +27,7 @@ public class BreakScheduleCache
     /// <summary>
     /// Get cached break schedules.
     /// Returns empty list if cache file doesn't exist or is invalid.
+    /// Invalidates cache if it's from a previous day (break schedules are date-specific).
     /// </summary>
     public List<BreakSchedule> GetSchedules()
     {
@@ -48,8 +49,33 @@ public class BreakScheduleCache
                 var data = JsonSerializer.Deserialize<BreakScheduleCacheData>(json, options);
                 if (data?.Schedules != null)
                 {
+                    // Check if cache is from today (break schedules are date-specific)
+                    var cacheDate = data.LastUpdated.Date;
+                    var today = DateTime.UtcNow.Date;
+                    
+                    if (cacheDate < today)
+                    {
+                        // Cache is from a previous day - invalidate it
+                        _logger?.LogInformation(
+                            "Break schedule cache is from {CacheDate}, but today is {Today}. Invalidating cache.",
+                            cacheDate, today);
+                        ClearCache();
+                        // Delete the old cache file
+                        try
+                        {
+                            File.Delete(_cacheFilePath);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogWarning(ex, "Failed to delete old cache file");
+                        }
+                        _cachedSchedules = new List<BreakSchedule>();
+                        return _cachedSchedules;
+                    }
+
                     _cachedSchedules = data.Schedules;
-                    _logger?.LogDebug("Loaded {Count} break schedules from cache", _cachedSchedules.Count);
+                    _logger?.LogDebug("Loaded {Count} break schedules from cache (dated {CacheDate})", 
+                        _cachedSchedules.Count, cacheDate);
                     return _cachedSchedules;
                 }
             }
