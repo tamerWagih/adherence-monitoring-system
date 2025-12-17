@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Net.Http;
@@ -19,9 +20,11 @@ public class TrayAppContext : ApplicationContext
     private readonly Icon _iconYellow;
     private readonly Icon _iconRed;
     private readonly System.Windows.Forms.Timer _statusTimer;
+    private readonly System.Windows.Forms.Timer _breakNotificationTimer;
     private AgentConfig _config = new();
     private readonly CredentialStore _credentialStore = new();
     private const string ServiceName = "AdherenceAgentService";
+    private long _lastProcessedBreakEventId = 0; // Track last processed break event to avoid duplicates
 
     public TrayAppContext()
     {
@@ -48,28 +51,28 @@ public class TrayAppContext : ApplicationContext
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
+        var isAdmin = IsCurrentUserAdministrator();
+        
+        // Status is always visible (read-only information)
         menu.Items.Add("Status", null, (_, _) => ShowStatus());
-        menu.Items.Add("Test API Connection", null, async (_, _) => await TestApiAsync());
-        menu.Items.Add("Add Test Event", null, async (_, _) => await AddTestEventAsync());
         
-        // Only administrators can set credentials (security requirement)
-        if (IsCurrentUserAdministrator())
+        // Admin-only actions
+        if (isAdmin)
         {
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Test API Connection", null, async (_, _) => await TestApiAsync());
+            menu.Items.Add("Add Test Event", null, async (_, _) => await AddTestEventAsync());
             menu.Items.Add("Set Credentials...", null, (_, _) => SetCredentials());
-        }
-        
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Start Service", null, (_, _) => ControlService(ServiceControllerStatus.Running));
-        
-        // Only administrators can stop service (security requirement)
-        if (IsCurrentUserAdministrator())
-        {
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Start Service", null, (_, _) => ControlService(ServiceControllerStatus.Running));
             menu.Items.Add("Stop Service", null, (_, _) => ControlService(ServiceControllerStatus.Stopped));
+            menu.Items.Add("Open Logs Folder", null, (_, _) => OpenLogs());
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Exit", null, (_, _) => ExitThread());
         }
+        // Non-admin users: Display-only mode - no actions available
+        // Note: They cannot exit the tray app to maintain status visibility
         
-        menu.Items.Add("Open Logs Folder", null, (_, _) => OpenLogs());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, (_, _) => ExitThread());
         return menu;
     }
     
@@ -291,7 +294,8 @@ public class TrayAppContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
-        _statusTimer.Stop();
+        _statusTimer?.Stop();
+        _breakNotificationTimer?.Stop();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _iconGreen.Dispose();
@@ -387,6 +391,159 @@ public class TrayAppContext : ApplicationContext
         {
             return "Not installed / unknown";
         }
+    }
+
+    /// <summary>
+    /// Check for new break events and show notifications.
+    /// </summary>
+    private void CheckBreakEvents()
+    {
+        try
+        {
+            using var connection = new System.Data.SQLite.SQLiteConnection($"Data Source={PathProvider.DatabaseFile};Pooling=true");
+            connection.Open();
+
+            // Query for break events newer than last processed
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                SELECT id, event_type, event_timestamp, metadata 
+                FROM event_buffer 
+                WHERE event_type IN ('BREAK_START', 'BREAK_END') 
+                  AND id > @lastId
+                ORDER BY id ASC
+                LIMIT 10";
+
+            cmd.Parameters.AddWithValue("@lastId", _lastProcessedBreakEventId);
+            
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var eventId = reader.GetInt64(0);
+                var eventType = reader.GetString(1);
+                var eventTimestamp = reader.GetString(2);
+                var metadataJson = reader.IsDBNull(3) ? null : reader.GetString(3);
+
+                _lastProcessedBreakEventId = Math.Max(_lastProcessedBreakEventId, eventId);
+
+                // Parse metadata
+                Dictionary<string, object>? metadata = null;
+                if (!string.IsNullOrEmpty(metadataJson))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(metadataJson);
+                        metadata = new Dictionary<string, object>();
+                        foreach (var prop in doc.RootElement.EnumerateObject())
+                        {
+                            if (prop.Value.ValueKind == JsonValueKind.String)
+                                metadata[prop.Name] = prop.Value.GetString() ?? string.Empty;
+                            else if (prop.Value.ValueKind == JsonValueKind.Number)
+                                metadata[prop.Name] = prop.Value.GetInt32();
+                            else if (prop.Value.ValueKind == JsonValueKind.True || prop.Value.ValueKind == JsonValueKind.False)
+                                metadata[prop.Name] = prop.Value.GetBoolean();
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore metadata parsing errors
+                    }
+                }
+
+                // Show notification based on event type
+                if (eventType == EventTypes.BreakStart)
+                {
+                    ShowBreakStartNotification(metadata);
+                }
+                else if (eventType == EventTypes.BreakEnd)
+                {
+                    ShowBreakEndNotification(metadata);
+                }
+            }
+        }
+        catch
+        {
+            // Silently ignore errors (database might be locked or unavailable)
+        }
+    }
+
+    /// <summary>
+    /// Show notification when break starts.
+    /// </summary>
+    private void ShowBreakStartNotification(Dictionary<string, object>? metadata)
+    {
+        string title = "Break Started";
+        string message = "Your break has been detected.";
+
+        if (metadata != null)
+        {
+            if (metadata.TryGetValue("scheduled_start_time", out var startTime) && startTime != null)
+            {
+                message = $"Break started at {startTime}.";
+            }
+
+            if (metadata.TryGetValue("scheduled_duration_minutes", out var duration) && duration != null)
+            {
+                var durationStr = duration.ToString();
+                if (int.TryParse(durationStr, out var durationMinutes))
+                {
+                    message += $" Scheduled duration: {durationMinutes} minutes.";
+                }
+            }
+        }
+
+        _notifyIcon.BalloonTipTitle = title;
+        _notifyIcon.BalloonTipText = message;
+        _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+        _notifyIcon.ShowBalloonTip(5000); // Show for 5 seconds
+    }
+
+    /// <summary>
+    /// Show notification when break ends.
+    /// </summary>
+    private void ShowBreakEndNotification(Dictionary<string, object>? metadata)
+    {
+        string title = "Break Ended";
+        string message = "You've returned from break.";
+
+        if (metadata != null)
+        {
+            if (metadata.TryGetValue("break_duration_minutes", out var duration) && duration != null)
+            {
+                var durationStr = duration.ToString();
+                if (int.TryParse(durationStr, out var durationMinutes))
+                {
+                    message = $"Break duration: {durationMinutes} minutes.";
+
+                    // Check if break exceeded scheduled duration
+                    if (metadata.TryGetValue("exceeded_minutes", out var exceeded) && exceeded != null)
+                    {
+                        var exceededStr = exceeded.ToString();
+                        if (int.TryParse(exceededStr, out var exceededMinutes) && exceededMinutes > 0)
+                        {
+                            title = "Break Ended - Warning";
+                            message += $" ⚠️ Exceeded scheduled duration by {exceededMinutes} minutes.";
+                            _notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
+                        }
+                        else
+                        {
+                            _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+                        }
+                    }
+                    else
+                    {
+                        _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+                    }
+                }
+            }
+        }
+        else
+        {
+            _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+        }
+
+        _notifyIcon.BalloonTipTitle = title;
+        _notifyIcon.BalloonTipText = message;
+        _notifyIcon.ShowBalloonTip(5000); // Show for 5 seconds
     }
 
     private static Icon CreateCircleIcon(Color color)

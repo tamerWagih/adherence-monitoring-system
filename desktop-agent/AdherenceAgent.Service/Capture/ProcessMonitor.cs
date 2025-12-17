@@ -129,6 +129,32 @@ public class ProcessMonitor
                     return;
                 }
 
+                // Skip development tools and UWP apps
+                if (!string.IsNullOrEmpty(processPath))
+                {
+                    if (IsDevelopmentToolDirectory(processPath))
+                    {
+                        _logger.LogDebug("Skipping development tool: {ProcessName} (PID: {ProcessId}, Path: {Path})", 
+                            normalizedName, processId, processPath);
+                        return;
+                    }
+
+                    if (IsUwpAppDirectory(processPath))
+                    {
+                        _logger.LogDebug("Skipping UWP app: {ProcessName} (PID: {ProcessId}, Path: {Path})", 
+                            normalizedName, processId, processPath);
+                        return;
+                    }
+                }
+
+                // Skip browsers - already covered by BrowserTabMonitor
+                if (IsBrowserProcess(normalizedName))
+                {
+                    _logger.LogDebug("Skipping browser process (covered by BrowserTabMonitor): {ProcessName} (PID: {ProcessId})", 
+                        normalizedName, processId);
+                    return;
+                }
+
                 // For GUI applications, windows may not be visible immediately (splash screens, initialization)
                 // Known GUI apps skip window visibility check entirely
                 bool isKnownGuiApp = IsKnownGuiApplication(normalizedName, processPath);
@@ -397,6 +423,107 @@ public class ProcessMonitor
         return false;
     }
 
+    private static bool IsDevelopmentToolDirectory(string? processPath)
+    {
+        if (string.IsNullOrEmpty(processPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(processPath);
+            if (string.IsNullOrEmpty(directory))
+            {
+                return false;
+            }
+
+            // Git installation directory
+            if (directory.Contains("Program Files\\Git", StringComparison.OrdinalIgnoreCase) ||
+                directory.Contains("Program Files (x86)\\Git", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // Node.js installation directory
+            if (directory.Contains("Program Files\\nodejs", StringComparison.OrdinalIgnoreCase) ||
+                directory.Contains("Program Files (x86)\\nodejs", StringComparison.OrdinalIgnoreCase) ||
+                directory.Contains("AppData\\Roaming\\npm", StringComparison.OrdinalIgnoreCase) ||
+                directory.Contains("AppData\\Local\\npm", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // .NET CLI installation directory
+            if (directory.Contains("Program Files\\dotnet", StringComparison.OrdinalIgnoreCase) ||
+                directory.Contains("Program Files (x86)\\dotnet", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // Visual Studio development tools
+            if (directory.Contains("Program Files\\Microsoft Visual Studio", StringComparison.OrdinalIgnoreCase) ||
+                directory.Contains("Program Files (x86)\\Microsoft Visual Studio", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // Common development tool directories
+            if (directory.Contains("AppData\\Local\\Programs\\Git", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            // Ignore path parsing errors
+        }
+
+        return false;
+    }
+
+    private static bool IsUwpAppDirectory(string? processPath)
+    {
+        if (string.IsNullOrEmpty(processPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            // UWP apps are installed in WindowsApps directory
+            if (processPath.Contains("WindowsApps\\", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            // Ignore path parsing errors
+        }
+
+        return false;
+    }
+
+    private static bool IsBrowserProcess(string processName)
+    {
+        // Browsers are already covered by BrowserTabMonitor
+        var browserProcesses = new[]
+        {
+            "chrome", "msedge", "firefox", "brave", "opera", "safari", "vivaldi"
+        };
+
+        foreach (var browser in browserProcesses)
+        {
+            if (processName.Equals(browser, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool HasVisibleWindows(int processId)
     {
         bool hasWindow = false;
@@ -432,9 +559,10 @@ public class ProcessMonitor
             
             // Other common GUI apps
             "notepad++", "Notepad++", "code", "devenv", "VisualStudio",
-            "chrome", "msedge", "firefox", "brave", "opera",
             "Teams", "ms-teams", "slack", "discord",
             "explorer", "winrar", "7zFM", "WinZip"
+            // Note: Browsers (chrome, msedge, firefox, etc.) are filtered separately
+            // since they're covered by BrowserTabMonitor
         };
 
         foreach (var app in knownGuiApps)
