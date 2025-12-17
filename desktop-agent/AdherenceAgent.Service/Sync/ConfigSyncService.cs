@@ -143,6 +143,21 @@ public class ConfigSyncService : BackgroundService
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
                     token);
 
+                // Log workstation configuration values
+                if (configData != null)
+                {
+                    _logger.LogInformation(
+                        "Configuration sync received - workstation_id: {WorkstationId}, batch_size: {BatchSize}, sync_interval_seconds: {SyncInterval}, idle_threshold_minutes: {IdleThreshold}",
+                        configData.WorkstationId,
+                        configData.BatchSize ?? _config.BatchSize,
+                        configData.SyncIntervalSeconds ?? _config.SyncIntervalSeconds,
+                        configData.IdleThresholdMinutes ?? _config.IdleThresholdMinutes);
+                    
+                    // Note: Dynamic configuration updates would require refactoring to inject a ConfigurationManager.
+                    // For now, these values are logged but not applied dynamically.
+                    // To apply changes, restart the service or implement a ConfigurationManager service.
+                }
+
                 if (configData?.ApplicationClassifications != null)
                 {
                     _classificationCache.SaveClassifications(configData.ApplicationClassifications);
