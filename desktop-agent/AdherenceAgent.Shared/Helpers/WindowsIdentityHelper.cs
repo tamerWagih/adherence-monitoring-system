@@ -1,5 +1,6 @@
 using System;
 using System.Security.Principal;
+using System.Runtime.InteropServices;
 
 namespace AdherenceAgent.Shared.Helpers;
 
@@ -11,6 +12,13 @@ namespace AdherenceAgent.Shared.Helpers;
 /// </summary>
 public static class WindowsIdentityHelper
 {
+    private static readonly HashSet<string> ServiceAccounts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SYSTEM",
+        "LOCAL SERVICE",
+        "NETWORK SERVICE"
+    };
+
     /// <summary>
     /// Gets the current NT account (sam_account_name) from the current Windows session.
     /// 
@@ -24,12 +32,31 @@ public static class WindowsIdentityHelper
             var identity = WindowsIdentity.GetCurrent();
             if (identity != null && !string.IsNullOrEmpty(identity.Name))
             {
-                return ExtractSamAccountName(identity.Name);
+                var sam = ExtractSamAccountName(identity.Name);
+                if (!string.IsNullOrWhiteSpace(sam) && !ServiceAccounts.Contains(sam))
+                {
+                    return sam;
+                }
             }
         }
         catch (Exception)
         {
             // Fall through to next method
+        }
+
+        // If we're running as a Windows Service, WindowsIdentity/Environment often return SYSTEM.
+        // Try to resolve the active interactive console user instead.
+        try
+        {
+            var activeUser = GetActiveConsoleUserName();
+            if (!string.IsNullOrWhiteSpace(activeUser) && !ServiceAccounts.Contains(activeUser))
+            {
+                return activeUser;
+            }
+        }
+        catch (Exception)
+        {
+            // Fall through
         }
 
         try
@@ -39,7 +66,10 @@ public static class WindowsIdentityHelper
             if (!string.IsNullOrEmpty(userName))
             {
                 // Environment.UserName typically returns sam_account_name without domain
-                return userName;
+                if (!ServiceAccounts.Contains(userName))
+                {
+                    return userName;
+                }
             }
         }
         catch (Exception)
@@ -49,6 +79,65 @@ public static class WindowsIdentityHelper
 
         // Fallback: Return empty string if unable to determine
         return string.Empty;
+    }
+
+    // --- WTS (Terminal Services) helpers to get the active console user ---
+    private const int WTS_CURRENT_SERVER_HANDLE = 0;
+    private static readonly IntPtr WTS_CURRENT_SERVER = IntPtr.Zero;
+
+    private enum WTS_INFO_CLASS
+    {
+        WTSUserName = 5,
+        WTSDomainName = 7,
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern uint WTSGetActiveConsoleSessionId();
+
+    [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool WTSQuerySessionInformation(
+        IntPtr hServer,
+        uint sessionId,
+        WTS_INFO_CLASS wtsInfoClass,
+        out IntPtr ppBuffer,
+        out uint pBytesReturned);
+
+    [DllImport("wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr pointer);
+
+    private static string GetActiveConsoleUserName()
+    {
+        var sessionId = WTSGetActiveConsoleSessionId();
+        if (sessionId == 0xFFFFFFFF) return string.Empty;
+
+        var user = QueryWtsString(sessionId, WTS_INFO_CLASS.WTSUserName);
+        if (string.IsNullOrWhiteSpace(user)) return string.Empty;
+
+        // We intentionally return sam account name only (no domain prefix).
+        return user;
+    }
+
+    private static string QueryWtsString(uint sessionId, WTS_INFO_CLASS infoClass)
+    {
+        IntPtr buffer = IntPtr.Zero;
+        uint bytesReturned = 0;
+        try
+        {
+            if (!WTSQuerySessionInformation(WTS_CURRENT_SERVER, sessionId, infoClass, out buffer, out bytesReturned))
+            {
+                return string.Empty;
+            }
+
+            if (buffer == IntPtr.Zero || bytesReturned == 0) return string.Empty;
+            return Marshal.PtrToStringUni(buffer) ?? string.Empty;
+        }
+        finally
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                WTSFreeMemory(buffer);
+            }
+        }
     }
 
     /// <summary>

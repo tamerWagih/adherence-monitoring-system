@@ -12,6 +12,7 @@ using AdherenceAgent.Shared.Security;
 using System.Security.Principal;
 using System.Media;
 using System.Linq;
+using AdherenceAgent.Tray.Capture;
 
 namespace AdherenceAgent.Tray;
 
@@ -27,9 +28,12 @@ public class TrayAppContext : ApplicationContext
     private AgentConfig _config = new();
     private readonly CredentialStore _credentialStore = new();
     private readonly BreakScheduleCache _breakScheduleCache = new();
+    private readonly ClassificationCache _classificationCache = new();
     private const string ServiceName = "AdherenceAgentService";
     private long _lastProcessedBreakEventId = 0; // Track last processed break event to avoid duplicates
     private DateTime _trayAppStartTime = DateTime.UtcNow; // Track when tray app started to avoid showing old events
+    private TrayInteractiveCapture? _interactiveCapture;
+    private SQLiteEventBuffer? _trayBuffer;
 
     public TrayAppContext()
     {
@@ -47,6 +51,53 @@ public class TrayAppContext : ApplicationContext
 
         LoadConfig();
         UpdateStatusIcon(); // initial
+
+        // Start interactive capture in the tray process (user session).
+        // This fixes "MSI installed service only captures APP_START/END" due to Session 0 isolation.
+        try
+        {
+            _trayBuffer = new SQLiteEventBuffer(_config, NullLogger<SQLiteEventBuffer>.Instance);
+            // Retry initialization (service may hold the DB briefly on startup)
+            var start = DateTime.UtcNow;
+            Exception? last = null;
+            while ((DateTime.UtcNow - start).TotalSeconds < 15)
+            {
+                try
+                {
+                    _trayBuffer.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
+                    last = null;
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    System.Threading.Thread.Sleep(500);
+                }
+            }
+            if (last != null) throw last;
+
+            _interactiveCapture = new TrayInteractiveCapture(_config, _trayBuffer, _classificationCache);
+            _interactiveCapture.Start();
+
+            try
+            {
+                PathProvider.EnsureDirectories();
+                var logPath = Path.Combine(PathProvider.LogsDirectory, "tray.log");
+                File.AppendAllText(logPath, $"{DateTime.UtcNow:o} Tray interactive capture started. DB={PathProvider.DatabaseFile}\n");
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            // Keep tray stable even if capture fails; service/process monitoring still works.
+            try
+            {
+                PathProvider.EnsureDirectories();
+                var logPath = Path.Combine(PathProvider.LogsDirectory, "tray.log");
+                File.AppendAllText(logPath, $"{DateTime.UtcNow:o} Tray capture failed to start: {ex}\n");
+            }
+            catch { }
+        }
 
         _statusTimer = new System.Windows.Forms.Timer { Interval = 30_000 }; // 30s
         _statusTimer.Tick += (_, _) => UpdateStatusIcon();
@@ -72,22 +123,22 @@ public class TrayAppContext : ApplicationContext
         // Add break schedule information
         AddBreakScheduleMenuItems(menu);
         
-        // Admin-only actions
+        menu.Items.Add(new ToolStripSeparator());
+        
+        // Set Credentials is available to all users (not just admins)
+        menu.Items.Add("Set Credentials...", null, (_, _) => SetCredentials());
+        
+        // Admin-only actions (but hide Exit and Stop Service since any user can run as admin)
         if (isAdmin)
         {
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Test API Connection", null, async (_, _) => await TestApiAsync());
             menu.Items.Add("Add Test Event", null, async (_, _) => await AddTestEventAsync());
-            menu.Items.Add("Set Credentials...", null, (_, _) => SetCredentials());
-            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Start Service", null, (_, _) => ControlService(ServiceControllerStatus.Running));
-            menu.Items.Add("Stop Service", null, (_, _) => ControlService(ServiceControllerStatus.Stopped));
             menu.Items.Add("Open Logs Folder", null, (_, _) => OpenLogs());
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Exit", null, (_, _) => ExitThread());
         }
-        // Non-admin users: Display-only mode - no actions available
-        // Note: They cannot exit the tray app to maintain status visibility
+        // Note: Exit and Stop Service are intentionally hidden - any user can run as admin,
+        // so we don't want to allow stopping the service or exiting the tray app
         
         return menu;
     }
@@ -221,6 +272,8 @@ public class TrayAppContext : ApplicationContext
     /// </summary>
     private void RefreshMenu()
     {
+        // Force cache reload so new schedules/classifications reflect without restart.
+        _breakScheduleCache.ClearCache();
         _notifyIcon.ContextMenuStrip = BuildMenu();
     }
     
@@ -420,8 +473,9 @@ public class TrayAppContext : ApplicationContext
         var (pending, failed) = GetBufferCounts();
         var svcStatus = GetServiceStatus();
         var creds = _credentialStore.Load();
+        // Don't expose DB and log file paths for security/privacy
         MessageBox.Show(
-            $"Service: {svcStatus}\nRegistered: {(creds.HasValue ? "Yes" : "No")}\nEndpoint: {_config.ApiEndpoint}\nPending: {pending}\nFailed: {failed}\nLogs: {PathProvider.LogsDirectory}\nDB: {PathProvider.DatabaseFile}",
+            $"Service: {svcStatus}\nRegistered: {(creds.HasValue ? "Yes" : "No")}\nEndpoint: {_config.ApiEndpoint}\nPending: {pending}\nFailed: {failed}",
             "Adherence Agent Status",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
@@ -445,6 +499,7 @@ public class TrayAppContext : ApplicationContext
         _statusTimer?.Stop();
         _breakNotificationTimer?.Stop();
         _menuRefreshTimer?.Stop();
+        try { _interactiveCapture?.Dispose(); } catch { }
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _iconGreen.Dispose();
@@ -488,8 +543,10 @@ public class TrayAppContext : ApplicationContext
             try
             {
                 _credentialStore.Save(txtWs.Text.Trim(), txtKey.Text.Trim());
-                MessageBox.Show("Credentials saved.", "Set Credentials", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Credentials saved. Configuration sync will occur within 30 seconds.", "Set Credentials", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 UpdateStatusIcon();
+                // Note: ConfigSyncService checks for credentials every 30 seconds when missing,
+                // so sync will happen automatically. No need to trigger manually.
             }
             catch (Exception ex)
             {

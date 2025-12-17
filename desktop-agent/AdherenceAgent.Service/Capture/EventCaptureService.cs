@@ -11,54 +11,53 @@ namespace AdherenceAgent.Service.Capture;
 public class EventCaptureService : BackgroundService
 {
     private readonly ILogger<EventCaptureService> _logger;
+    private readonly IEventBuffer _buffer;
     private readonly LoginLogoffMonitor _loginMonitor;
     private readonly IdleMonitor _idleMonitor;
     private readonly SessionSwitchMonitor _sessionSwitchMonitor;
-    private readonly ActiveWindowMonitor _windowMonitor;
-    private readonly TeamsMonitor? _teamsMonitor;
-    private readonly BrowserTabMonitor? _browserTabMonitor;
-    private readonly ProcessMonitor? _processMonitor;
-    private readonly BreakAlertMonitor? _breakAlertMonitor;
+    private readonly ProcessMonitor _processMonitor;
+    private readonly BreakAlertMonitor _breakAlertMonitor;
 
     public EventCaptureService(
         ILogger<EventCaptureService> logger,
+        IEventBuffer buffer,
         LoginLogoffMonitor loginMonitor,
         IdleMonitor idleMonitor,
         SessionSwitchMonitor sessionSwitchMonitor,
-        ActiveWindowMonitor windowMonitor,
-        TeamsMonitor? teamsMonitor = null,
-        BrowserTabMonitor? browserTabMonitor = null,
-        ProcessMonitor? processMonitor = null,
-        BreakAlertMonitor? breakAlertMonitor = null)
+        ProcessMonitor processMonitor,
+        BreakAlertMonitor breakAlertMonitor)
     {
         _logger = logger;
+        _buffer = buffer;
         _loginMonitor = loginMonitor;
         _idleMonitor = idleMonitor;
         _sessionSwitchMonitor = sessionSwitchMonitor;
-        _windowMonitor = windowMonitor;
-        _teamsMonitor = teamsMonitor;
-        _browserTabMonitor = browserTabMonitor;
         _processMonitor = processMonitor;
         _breakAlertMonitor = breakAlertMonitor;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Starting event capture service.");
+        // Wait for database initialization before starting monitors
+        _logger.LogInformation("Waiting for database initialization before starting event capture...");
+        try
+        {
+            await _buffer.InitializeAsync(stoppingToken);
+            _logger.LogInformation("Database initialized, starting event capture service.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initialize database, event capture will not start.");
+            throw;
+        }
+
         _loginMonitor.Start(stoppingToken);
         _idleMonitor.Start(stoppingToken);
         _sessionSwitchMonitor.Start(stoppingToken);
-        _windowMonitor.Start(stoppingToken);
+        _processMonitor.Start(stoppingToken);
+        _breakAlertMonitor.Start(stoppingToken);
         
-        // Start Day 8 monitors if available
-        _teamsMonitor?.Start(stoppingToken);
-        _browserTabMonitor?.Start(stoppingToken);
-        _processMonitor?.Start(stoppingToken);
-        
-        // Start break alert monitor (for scheduled break notifications)
-        _breakAlertMonitor?.Start(stoppingToken);
-        
-        return Task.CompletedTask;
+        _logger.LogInformation("Service monitors started: LoginLogoff, Idle, SessionSwitch, ProcessMonitor, BreakAlertMonitor. Interactive capture is handled by the tray app.");
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)
@@ -67,15 +66,8 @@ public class EventCaptureService : BackgroundService
         _loginMonitor.Stop();
         _idleMonitor.Stop();
         _sessionSwitchMonitor.Stop();
-        _windowMonitor.Stop();
-        
-        // Stop Day 8 monitors if available
-        _teamsMonitor?.Stop();
-        _browserTabMonitor?.Stop();
-        _processMonitor?.Stop();
-        
-        // Stop break alert monitor
-        _breakAlertMonitor?.Stop();
+        _processMonitor.Stop();
+        _breakAlertMonitor.Stop();
         
         return base.StopAsync(cancellationToken);
     }

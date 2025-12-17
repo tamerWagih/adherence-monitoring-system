@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+
+  <?define ProductName = "Adherence Monitoring Agent" ?>
+  <?define ProductVersion = "1.0.13" ?>
+  <?define ProductCode = "*" ?>
+  <?define UpgradeCode = "A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D" ?>
+  <?define Manufacturer = "Octopus WFM" ?>
+  <?define ServiceName = "AdherenceAgentService" ?>
+  <?define ServiceDisplayName = "Adherence Monitoring Agent" ?>
+  <?define ServiceDescription = "Monitors workstation activity and uploads adherence data." ?>
+
+  <Product Id="$(var.ProductCode)"
+           Name="$(var.ProductName)"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           Manufacturer="$(var.Manufacturer)"
+           UpgradeCode="$(var.UpgradeCode)">
+
+    <Package InstallerVersion="200"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="$(var.ProductName) Installer"
+             Keywords="Adherence,Monitoring,Agent"
+             Manufacturer="$(var.Manufacturer)" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Installation directory structure -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="AdherenceAgent">
+          <Directory Id="ServiceFolder" Name="Service" />
+          <Directory Id="TrayFolder" Name="Tray" />
+        </Directory>
+      </Directory>
+
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="ProgramDataFolder" Name="AdherenceAgent">
+          <Directory Id="LogsFolder" Name="logs" />
+        </Directory>
+      </Directory>
+
+      <!-- Per-machine Start Menu hierarchy (Startup is under ProgramData\...\Start Menu\Programs\Startup) -->
+      <Directory Id="CommonProgramMenuFolder">
+        <Directory Id="CommonStartupFolder" Name="Startup" />
+      </Directory>
+    </Directory>
+
+    <!-- Feature -->
+    <Feature Id="MainFeature" Title="$(var.ProductName)" Level="1">
+      <ComponentGroupRef Id="ServiceComponents" />
+      <ComponentGroupRef Id="TrayComponents" />
+      <ComponentGroupRef Id="TrayStartupComponents" />
+      <ComponentGroupRef Id="ConfigComponents" />
+      <ComponentGroupRef Id="DataFolderComponents" />
+      <ComponentGroupRef Id="LogsFolderComponents" />
+    </Feature>
+
+    <!-- Lock down service control so non-admin users can't stop/start it -->
+    <!-- Uses WixQuietExec (built-in WiX CA) to run sc.exe sdset -->
+    <CustomAction Id="SetServiceAcl"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+    <CustomAction Id="SetServiceAcl_SetProperty"
+                  Property="SetServiceAcl"
+                  Value="&quot;[SystemFolder]sc.exe&quot; sdset $(var.ServiceName) &quot;D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;AU)&quot;" />
+
+    <!-- Configure service recovery: restart on failure -->
+    <CustomAction Id="SetServiceRecovery"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <CustomAction Id="SetServiceRecovery_SetProperty"
+                  Property="SetServiceRecovery"
+                  Value="&quot;[SystemFolder]sc.exe&quot; failure $(var.ServiceName) reset= 86400 actions= restart/60000/restart/60000/restart/60000" />
+    <CustomAction Id="SetServiceRecoveryFlag"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <CustomAction Id="SetServiceRecoveryFlag_SetProperty"
+                  Property="SetServiceRecoveryFlag"
+                  Value="&quot;[SystemFolder]sc.exe&quot; failureflag $(var.ServiceName) 1" />
+
+    <!-- Ensure tray is not running during uninstall (prevents file locks) -->
+    <CustomAction Id="KillTray"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <CustomAction Id="KillTray_SetProperty"
+                  Property="KillTray"
+                  Value="&quot;[SystemFolder]taskkill.exe&quot; /F /T /IM AdherenceAgent.Tray.exe" />
+
+
+    <!-- Launch tray app after installation (for current user session) -->
+    <!-- Note: ExecuteSequence runs elevated and cannot reliably launch GUI in user session.
+         We launch from the UI sequence instead (see InstallUISequence below). -->
+    <Property Id="WixShellExecTarget" Value="[#TrayExeFile]" />
+    <CustomAction Id="LaunchTrayApp"
+                  BinaryKey="WixCA"
+                  DllEntry="WixShellExec"
+                  Execute="immediate"
+                  Impersonate="yes"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="SetServiceAcl_SetProperty" After="InstallServices"><![CDATA[NOT Installed]]></Custom>
+      <Custom Action="SetServiceAcl" After="SetServiceAcl_SetProperty"><![CDATA[NOT Installed]]></Custom>
+      <Custom Action="SetServiceRecovery_SetProperty" After="InstallServices"><![CDATA[NOT Installed]]></Custom>
+      <Custom Action="SetServiceRecovery" After="SetServiceRecovery_SetProperty"><![CDATA[NOT Installed]]></Custom>
+      <Custom Action="SetServiceRecoveryFlag_SetProperty" After="InstallServices"><![CDATA[NOT Installed]]></Custom>
+      <Custom Action="SetServiceRecoveryFlag" After="SetServiceRecoveryFlag_SetProperty"><![CDATA[NOT Installed]]></Custom>
+      <!-- Stop services first (ServiceControl), then kill tray to avoid watchdog respawn during uninstall -->
+      <Custom Action="KillTray_SetProperty" After="StopServices"><![CDATA[REMOVE="ALL"]]></Custom>
+      <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
+    </InstallExecuteSequence>
+
+    <!-- Launch tray after install only when UI is present -->
+    <InstallUISequence>
+      <Custom Action="LaunchTrayApp" After="ExecuteAction"><![CDATA[NOT Installed]]></Custom>
+    </InstallUISequence>
+
+    <!-- UI -->
+    <UIRef Id="WixUI_Minimal" />
+    <!-- Use our license text instead of WiX placeholder -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtfPath)" />
+
+  </Product>
+
+  <!-- Service + files -->
+  <Fragment>
+    <ComponentGroup Id="ServiceComponents" Directory="ServiceFolder">
+      <Component Id="ServiceExe" Guid="B1C2D3E4-F5A6-4B7C-8D9E-0F1A2B3C4D5E">
+        <File Id="ServiceExeFile"
+              Source="$(var.ServiceBinPath)\AdherenceAgent.Service.exe"
+              KeyPath="yes" />
+
+        <ServiceInstall Id="ServiceInstall"
+                       Type="ownProcess"
+                       Name="$(var.ServiceName)"
+                       DisplayName="$(var.ServiceDisplayName)"
+                       Description="$(var.ServiceDescription)"
+                       Start="auto"
+                       Account="LocalSystem"
+                       ErrorControl="normal"
+                       Interactive="no" />
+
+        <ServiceControl Id="ServiceControl"
+                        Name="$(var.ServiceName)"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Tray + files -->
+  <Fragment>
+    <ComponentGroup Id="TrayComponents" Directory="TrayFolder">
+      <Component Id="TrayExe" Guid="C2D3E4F5-A6B7-4C8D-9E0F-1A2B3C4D5E6F">
+        <File Id="TrayExeFile"
+              Source="$(var.TrayBinPath)\AdherenceAgent.Tray.exe"
+              KeyPath="yes" />
+      </Component>
+
+      <Component Id="TrayConfig" Guid="9F2C5B32-0F8E-4D8A-9E6B-7C9EDB2C8C6A">
+        <File Id="TrayConfigFile"
+              Source="$(var.TrayBinPath)\appsettings.json"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Tray startup shortcut (all users) -->
+  <Fragment>
+    <DirectoryRef Id="CommonStartupFolder">
+      <Component Id="TrayStartupShortcutComponent" Guid="D3E4F5A6-B7C8-4D9E-0F1A-2B3C4D5E6F7A">
+        <CreateFolder />
+        <Shortcut Id="TrayStartupShortcut"
+                  Name="Adherence Agent"
+                  Description="Adherence Monitoring Agent Tray Application"
+                  Target="[INSTALLFOLDER]Tray\AdherenceAgent.Tray.exe"
+                  WorkingDirectory="TrayFolder" />
+        <!-- Ensure shortcut is removed on uninstall (ICE64) -->
+        <RemoveFile Id="RemoveTrayStartupShortcut" Name="Adherence Agent.lnk" On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\OctopusWFM\AdherenceAgent"
+                       Name="TrayAutoStart"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="TrayStartupComponents">
+      <ComponentRef Id="TrayStartupShortcutComponent" />
+    </ComponentGroup>
+  </Fragment>
+
+
+  <!-- Service config -->
+  <Fragment>
+    <ComponentGroup Id="ConfigComponents" Directory="ServiceFolder">
+      <Component Id="ServiceConfig" Guid="E4F5A6B7-C8D9-4E0F-1A2B-3C4D5E6F7A8B">
+        <File Id="ServiceConfigFile"
+              Source="$(var.ServiceBinPath)\appsettings.json"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- ProgramData folders -->
+  <Fragment>
+    <ComponentGroup Id="DataFolderComponents" Directory="ProgramDataFolder">
+      <Component Id="DataFolder" Guid="F5A6B7C8-D9E0-4F1A-2B3C-4D5E6F7A8B9C">
+        <CreateFolder>
+          <!-- Allow interactive users (tray) to write the shared SQLite DB in ProgramData -->
+          <util:PermissionEx User="Users" GenericRead="yes" GenericWrite="yes" GenericExecute="yes" Delete="yes" />
+        </CreateFolder>
+        <!-- Keep data on uninstall: do not remove ProgramDataFolder -->
+        <RegistryValue Root="HKLM"
+                       Key="Software\OctopusWFM\AdherenceAgent"
+                       Name="DataFolderCreated"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="LogsFolderComponents" Directory="LogsFolder">
+      <Component Id="LogsFolderComponent" Guid="A6B7C8D9-E0F1-4A2B-3C4D-5E6F7A8B9C0D">
+        <CreateFolder>
+          <!-- Allow tray/service to write logs for non-admin users -->
+          <util:PermissionEx User="Users" GenericRead="yes" GenericWrite="yes" GenericExecute="yes" Delete="yes" />
+        </CreateFolder>
+        <RegistryValue Root="HKLM"
+                       Key="Software\OctopusWFM\AdherenceAgent"
+                       Name="LogsFolderCreated"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

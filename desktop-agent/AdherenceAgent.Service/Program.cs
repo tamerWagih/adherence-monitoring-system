@@ -1,6 +1,7 @@
 using AdherenceAgent.Service;
 using AdherenceAgent.Service.Capture;
 using AdherenceAgent.Service.Sync;
+using AdherenceAgent.Service.Tray;
 using AdherenceAgent.Service.Upload;
 using AdherenceAgent.Shared.Configuration;
 using AdherenceAgent.Shared.Security;
@@ -80,25 +81,18 @@ var host = Host.CreateDefaultBuilder(args)
             agentConfig.IdleThresholdSeconds,
             provider.GetRequiredService<BreakDetector>()));
         services.AddSingleton<SessionSwitchMonitor>();
-        services.AddSingleton<ActiveWindowMonitor>();
-        services.AddSingleton<TeamsMonitor>(provider => new TeamsMonitor(
-            provider.GetRequiredService<ILogger<TeamsMonitor>>(),
-            provider.GetRequiredService<IEventBuffer>(),
-            agentConfig));
-        services.AddSingleton<BrowserTabMonitor>(provider => new BrowserTabMonitor(
-            provider.GetRequiredService<ILogger<BrowserTabMonitor>>(),
-            provider.GetRequiredService<IEventBuffer>(),
-            agentConfig));
         services.AddSingleton<ProcessMonitor>(provider => new ProcessMonitor(
             provider.GetRequiredService<ILogger<ProcessMonitor>>(),
             provider.GetRequiredService<IEventBuffer>()));
         services.AddSingleton<CredentialStore>();
         services.AddHttpClient("adherence");
+        services.AddHostedService<Worker>(); // Start Worker first to initialize database
         services.AddHostedService<EventCaptureService>();
         services.AddHostedService<UploadService>();
         services.AddHostedService<ConfigSyncService>();
         services.AddHostedService<BreakTimerService>();
-        services.AddHostedService<Worker>();
+        // Keep tray alive in the interactive session so we don't lose interactive capture if user kills it.
+        services.AddHostedService<TrayWatchdogService>();
     })
     .Build();
 

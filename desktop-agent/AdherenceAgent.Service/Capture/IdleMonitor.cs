@@ -7,7 +7,8 @@ using Microsoft.Extensions.Logging;
 namespace AdherenceAgent.Service.Capture;
 
 /// <summary>
-/// Polls for idle/active transitions using GetLastInputInfo.
+/// Polls for idle/active transitions using WTS APIs (works from Windows Service context).
+/// GetLastInputInfo doesn't work from services running as LocalSystem, so we use WTS APIs instead.
 /// </summary>
 public class IdleMonitor
 {
@@ -19,6 +20,7 @@ public class IdleMonitor
     private Timer? _timer;
     private bool _isIdle;
     private DateTime? _idleStartUtc;
+    private DateTime? _lastKnownActiveTime;
 
     public IdleMonitor(
         ILogger<IdleMonitor> logger,
@@ -35,6 +37,7 @@ public class IdleMonitor
         _idleThreshold = idleThresholdSecondsOverride > 0
             ? TimeSpan.FromSeconds(Math.Max(1, idleThresholdSecondsOverride))
             : TimeSpan.FromMinutes(Math.Max(1, idleThresholdMinutes));
+        _lastKnownActiveTime = DateTime.UtcNow; // Initialize to now to avoid false idle at startup
     }
 
     public void Start(CancellationToken token)
@@ -53,6 +56,15 @@ public class IdleMonitor
         try
         {
             var idleTime = GetIdleTime();
+            
+            // If idleTime is suspiciously large (> 1 day), it's likely stale data from service context
+            // Reset to zero to avoid false idle detection
+            if (idleTime.TotalDays > 1)
+            {
+                _logger.LogDebug("Detected suspiciously large idle time ({Days} days), resetting to zero (likely stale data from service context)", idleTime.TotalDays);
+                idleTime = TimeSpan.Zero;
+            }
+            
             var idleDurationMinutes = idleTime.TotalMinutes;
             var wasIdle = _isIdle;
 
@@ -71,7 +83,6 @@ public class IdleMonitor
                 _logger.LogInformation("Idle start detected after {Seconds}s", idleTime.TotalSeconds);
 
                 // Check for break detection
-                // Use idleTime.TotalMinutes instead of idleDurationMinutes (which is current idle, not total)
                 if (_breakDetector != null)
                 {
                     var totalIdleMinutes = idleTime.TotalMinutes;
@@ -86,6 +97,7 @@ public class IdleMonitor
                 var totalIdle = _idleStartUtc.HasValue ? (DateTime.UtcNow - _idleStartUtc.Value) : idleTime;
                 var totalIdleMinutes = totalIdle.TotalMinutes;
                 _idleStartUtc = null;
+                _lastKnownActiveTime = DateTime.UtcNow; // Update last known active time
                 var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
                 await _buffer.AddAsync(new AdherenceEvent
                 {
@@ -118,6 +130,12 @@ public class IdleMonitor
                 // This ensures break windows are detected even if user is active when window starts
                 await _breakDetector.CheckBreakStatusAsync(false, null, 0);
             }
+            
+            // Update last known active time if user is active
+            if (!_isIdle && idleTime < _idleThreshold)
+            {
+                _lastKnownActiveTime = DateTime.UtcNow;
+            }
         }
         catch (Exception ex)
         {
@@ -125,19 +143,181 @@ public class IdleMonitor
         }
     }
 
-    private static TimeSpan GetIdleTime()
+    /// <summary>
+    /// Gets idle time using WTS APIs (works from Windows Service context).
+    /// Falls back to GetLastInputInfo if WTS fails, but caps suspiciously large values.
+    /// </summary>
+    private TimeSpan GetIdleTime()
     {
-        var info = new LASTINPUTINFO();
-        info.cbSize = (uint)Marshal.SizeOf(info);
-        if (!GetLastInputInfo(ref info))
+        // Try WTS API first (works from service context)
+        var wtsIdleTime = GetIdleTimeFromWts();
+        if (wtsIdleTime.HasValue)
         {
-            return TimeSpan.Zero;
+            return wtsIdleTime.Value;
         }
 
-        uint idleTicks = unchecked((uint)Environment.TickCount - info.dwTime);
-        return TimeSpan.FromMilliseconds(idleTicks);
+        // Fallback to GetLastInputInfo (may not work from service, but try anyway)
+        var info = new LASTINPUTINFO();
+        info.cbSize = (uint)Marshal.SizeOf(info);
+        if (GetLastInputInfo(ref info))
+        {
+            uint idleTicks = unchecked((uint)Environment.TickCount - info.dwTime);
+            var idleTime = TimeSpan.FromMilliseconds(idleTicks);
+            
+            // Cap suspiciously large values (likely stale data from service context)
+            if (idleTime.TotalDays > 1)
+            {
+                _logger.LogDebug("GetLastInputInfo returned suspiciously large idle time ({Days} days), using last known active time instead", idleTime.TotalDays);
+                if (_lastKnownActiveTime.HasValue)
+                {
+                    return DateTime.UtcNow - _lastKnownActiveTime.Value;
+                }
+                return TimeSpan.Zero;
+            }
+            
+            return idleTime;
+        }
+
+        // If both fail, use last known active time
+        if (_lastKnownActiveTime.HasValue)
+        {
+            return DateTime.UtcNow - _lastKnownActiveTime.Value;
+        }
+
+        return TimeSpan.Zero;
     }
 
+    /// <summary>
+    /// Gets idle time using WTS APIs for the active console session.
+    /// Returns null if unable to determine (e.g., no active session).
+    /// </summary>
+    private TimeSpan? GetIdleTimeFromWts()
+    {
+        try
+        {
+            var sessionId = WTSGetActiveConsoleSessionId();
+            if (sessionId == 0xFFFFFFFF || sessionId == 0)
+            {
+                return null; // No active console session
+            }
+
+            IntPtr buffer = IntPtr.Zero;
+            uint bytesReturned = 0;
+            try
+            {
+                if (!WTSQuerySessionInformation(IntPtr.Zero, sessionId, WTS_INFO_CLASS.WTSSessionInfo, out buffer, out bytesReturned))
+                {
+                    return null;
+                }
+
+                if (buffer == IntPtr.Zero || bytesReturned == 0)
+                {
+                    return null;
+                }
+
+                // Marshal WTSINFO structure
+                var wtsInfo = Marshal.PtrToStructure<WTSINFO>(buffer);
+                
+                // WTSINFO.LastInputTime is in FILETIME (100-nanosecond intervals since 1601-01-01)
+                // Convert to DateTime and calculate idle time
+                if (wtsInfo.LastInputTime > 0 && wtsInfo.CurrentTime > 0)
+                {
+                    var lastInput = DateTime.FromFileTime(wtsInfo.LastInputTime);
+                    var currentTime = DateTime.FromFileTime(wtsInfo.CurrentTime);
+                    var idleTime = currentTime - lastInput;
+                    
+                    // If LastInputTime is suspiciously old (> 1 day), it's likely stale
+                    // Use last known active time instead
+                    if (idleTime.TotalDays > 1)
+                    {
+                        _logger.LogDebug("WTS LastInputTime is suspiciously old ({Days} days), likely stale", idleTime.TotalDays);
+                        if (_lastKnownActiveTime.HasValue)
+                        {
+                            return DateTime.UtcNow - _lastKnownActiveTime.Value;
+                        }
+                        return TimeSpan.Zero;
+                    }
+                    
+                    return idleTime;
+                }
+            }
+            finally
+            {
+                if (buffer != IntPtr.Zero)
+                {
+                    WTSFreeMemory(buffer);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to get idle time from WTS");
+        }
+
+        return null;
+    }
+
+    // --- WTS API declarations ---
+    private const int WTS_CURRENT_SERVER_HANDLE = 0;
+    
+    private enum WTS_INFO_CLASS
+    {
+        WTSSessionInfo = 0
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern uint WTSGetActiveConsoleSessionId();
+
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    private static extern bool WTSQuerySessionInformation(
+        IntPtr hServer,
+        uint sessionId,
+        WTS_INFO_CLASS wtsInfoClass,
+        out IntPtr ppBuffer,
+        out uint pBytesReturned);
+
+    [DllImport("wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr pointer);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct WTSINFO
+    {
+        public WTS_CONNECTSTATE_CLASS State;
+        public int SessionId;
+        public int IncomingBytes;
+        public int OutgoingBytes;
+        public int IncomingFrames;
+        public int OutgoingFrames;
+        public int IncomingCompressedBytes;
+        public int OutgoingCompressedBytes;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string WinStationName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 17)]
+        public string Domain;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 21)]
+        public string UserName;
+        public long ConnectTime;
+        public long DisconnectTime;
+        public long LastInputTime;
+        public long LogonTime;
+        public long CurrentTime;
+    }
+
+    private enum WTS_CONNECTSTATE_CLASS
+    {
+        WTSActive,
+        WTSConnected,
+        WTSConnectQuery,
+        WTSShadow,
+        WTSDisconnected,
+        WTSIdle,
+        WTSListen,
+        WTSReset,
+        WTSDown,
+        WTSInit
+    }
+
+    // --- Fallback GetLastInputInfo declarations ---
     [StructLayout(LayoutKind.Sequential)]
     private struct LASTINPUTINFO
     {

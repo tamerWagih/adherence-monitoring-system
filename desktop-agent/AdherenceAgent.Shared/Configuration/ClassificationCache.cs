@@ -15,6 +15,7 @@ public class ClassificationCache
     private readonly string _cacheFilePath;
     private readonly ILogger<ClassificationCache>? _logger;
     private List<ApplicationClassification>? _cachedClassifications;
+    private DateTime? _lastLoadedFileWriteUtc;
 
     public ClassificationCache(ILogger<ClassificationCache>? logger = null)
     {
@@ -29,6 +30,27 @@ public class ClassificationCache
     /// </summary>
     public List<ApplicationClassification> GetClassifications()
     {
+        // If cache exists, invalidate it when the file on disk changes.
+        // This allows the service/tray to reflect new classifications without a restart.
+        try
+        {
+            if (_cachedClassifications != null && File.Exists(_cacheFilePath))
+            {
+                var writeUtc = File.GetLastWriteTimeUtc(_cacheFilePath);
+                // IMPORTANT: If the cache was loaded before the file existed, _lastLoadedFileWriteUtc can be null.
+                // In that case, the first time the file appears we MUST reload.
+                if (!_lastLoadedFileWriteUtc.HasValue || writeUtc > _lastLoadedFileWriteUtc.Value)
+                {
+                    _logger?.LogDebug("Classifications cache file changed on disk; reloading.");
+                    _cachedClassifications = null;
+                }
+            }
+        }
+        catch
+        {
+            // ignore file stat errors; fall through to cached value if present
+        }
+
         if (_cachedClassifications != null)
         {
             return _cachedClassifications;
@@ -48,6 +70,7 @@ public class ClassificationCache
                 if (data?.Classifications != null)
                 {
                     _cachedClassifications = data.Classifications;
+                    try { _lastLoadedFileWriteUtc = File.GetLastWriteTimeUtc(_cacheFilePath); } catch { /* ignore */ }
                     _logger?.LogDebug("Loaded {Count} classifications from cache", _cachedClassifications.Count);
                     return _cachedClassifications;
                 }
@@ -60,6 +83,7 @@ public class ClassificationCache
 
         // Return empty list if cache doesn't exist or failed to load
         _cachedClassifications = new List<ApplicationClassification>();
+        try { _lastLoadedFileWriteUtc = File.Exists(_cacheFilePath) ? File.GetLastWriteTimeUtc(_cacheFilePath) : null; } catch { /* ignore */ }
         return _cachedClassifications;
     }
 
@@ -87,6 +111,7 @@ public class ClassificationCache
             File.WriteAllText(_cacheFilePath, json);
 
             _cachedClassifications = classifications;
+            try { _lastLoadedFileWriteUtc = File.GetLastWriteTimeUtc(_cacheFilePath); } catch { /* ignore */ }
             _logger?.LogInformation("Saved {Count} classifications to cache", classifications.Count);
         }
         catch (Exception ex)
@@ -102,6 +127,7 @@ public class ClassificationCache
     public void ClearCache()
     {
         _cachedClassifications = null;
+        _lastLoadedFileWriteUtc = null;
     }
 
     /// <summary>

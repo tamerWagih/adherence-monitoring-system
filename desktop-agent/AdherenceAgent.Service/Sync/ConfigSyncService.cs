@@ -17,7 +17,7 @@ namespace AdherenceAgent.Service.Sync;
 
 /// <summary>
 /// Background service that periodically syncs workstation configuration (including application classifications) from backend.
-/// Syncs on startup and then every hour (or configurable interval).
+/// Syncs on startup and then every 15 minutes (or configurable interval).
 /// </summary>
 public class ConfigSyncService : BackgroundService
 {
@@ -46,7 +46,9 @@ public class ConfigSyncService : BackgroundService
         _classificationCache = classificationCache;
         _breakScheduleCache = breakScheduleCache;
         _httpClientFactory = httpClientFactory;
-        _syncInterval = TimeSpan.FromHours(1); // Sync every hour by default
+        // Sync every 15 minutes by default, but can be configured via backend response
+        // Also syncs immediately when credentials are detected (after being added)
+        _syncInterval = TimeSpan.FromMinutes(15);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -75,7 +77,15 @@ public class ConfigSyncService : BackgroundService
                 if (!HasCredentials())
                 {
                     LoadCredentials();
-                    await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken); // Check again in 5 minutes
+                    // Check more frequently when credentials are missing (every 30 seconds)
+                    // This allows quick sync after credentials are added via tray app
+                    await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                    // If credentials were just added, sync immediately
+                    if (HasCredentials())
+                    {
+                        _logger.LogInformation("Credentials detected, performing immediate configuration sync...");
+                        await SyncConfigurationAsync(stoppingToken);
+                    }
                     continue;
                 }
 

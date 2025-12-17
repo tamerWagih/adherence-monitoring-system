@@ -125,7 +125,7 @@ public class TeamsMonitor
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "TeamsMonitor tick failed.");
+            _logger.LogWarning(ex, "TeamsMonitor tick failed: {Message}", ex.Message);
         }
     }
 
@@ -189,8 +189,15 @@ public class TeamsMonitor
             }
         };
 
-        await _buffer.AddAsync(evt, token);
-        _logger.LogInformation("Teams meeting started: {Title}", windowTitle);
+        try
+        {
+            await _buffer.AddAsync(evt, token);
+            _logger.LogInformation("Teams meeting started: {Title}", windowTitle);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to store Teams meeting start event");
+        }
     }
 
     private async Task EndMeetingAsync(CancellationToken token)
@@ -218,8 +225,15 @@ public class TeamsMonitor
             }
         };
 
-        await _buffer.AddAsync(evt, token);
-        _logger.LogInformation("Teams meeting ended. Duration: {Duration} minutes", meetingDuration.TotalMinutes);
+        try
+        {
+            await _buffer.AddAsync(evt, token);
+            _logger.LogInformation("Teams meeting ended. Duration: {Duration} minutes", meetingDuration.TotalMinutes);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to store Teams meeting end event");
+        }
         
         _meetingStartUtc = null;
     }
@@ -244,8 +258,15 @@ public class TeamsMonitor
             }
         };
 
-        await _buffer.AddAsync(evt, token);
-        _logger.LogDebug("Teams chat active: {Title}", windowTitle);
+        try
+        {
+            await _buffer.AddAsync(evt, token);
+            _logger.LogDebug("Teams chat active: {Title}", windowTitle);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to store Teams chat start event");
+        }
     }
 
     private async Task CreateChatActiveEventAsync(CancellationToken token)
@@ -267,7 +288,14 @@ public class TeamsMonitor
             }
         };
 
-        await _buffer.AddAsync(evt, token);
+        try
+        {
+            await _buffer.AddAsync(evt, token);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to store Teams chat active (periodic) event");
+        }
     }
 
     private Task EndChatAsync(CancellationToken token)

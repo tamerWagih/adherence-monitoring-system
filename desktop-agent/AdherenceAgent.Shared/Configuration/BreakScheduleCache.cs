@@ -16,6 +16,7 @@ public class BreakScheduleCache
     private readonly string _cacheFilePath;
     private readonly ILogger<BreakScheduleCache>? _logger;
     private List<BreakSchedule>? _cachedSchedules;
+    private DateTime? _lastLoadedFileWriteUtc;
 
     public BreakScheduleCache(ILogger<BreakScheduleCache>? logger = null)
     {
@@ -31,6 +32,27 @@ public class BreakScheduleCache
     /// </summary>
     public List<BreakSchedule> GetSchedules()
     {
+        // If cache exists, invalidate it when the file on disk changes.
+        // This allows the tray/service to reflect new schedules without a restart.
+        try
+        {
+            if (_cachedSchedules != null && File.Exists(_cacheFilePath))
+            {
+                var writeUtc = File.GetLastWriteTimeUtc(_cacheFilePath);
+                // IMPORTANT: If the cache was loaded before the file existed, _lastLoadedFileWriteUtc can be null.
+                // In that case, the first time the file appears we MUST reload.
+                if (!_lastLoadedFileWriteUtc.HasValue || writeUtc > _lastLoadedFileWriteUtc.Value)
+                {
+                    _logger?.LogDebug("Break schedules cache file changed on disk; reloading.");
+                    _cachedSchedules = null;
+                }
+            }
+        }
+        catch
+        {
+            // ignore file stat errors; fall through to cached value if present
+        }
+
         if (_cachedSchedules != null)
         {
             return _cachedSchedules;
@@ -74,6 +96,7 @@ public class BreakScheduleCache
                     }
 
                     _cachedSchedules = data.Schedules;
+                    try { _lastLoadedFileWriteUtc = File.GetLastWriteTimeUtc(_cacheFilePath); } catch { /* ignore */ }
                     _logger?.LogDebug("Loaded {Count} break schedules from cache (dated {CacheDate})", 
                         _cachedSchedules.Count, cacheDate);
                     return _cachedSchedules;
@@ -87,6 +110,7 @@ public class BreakScheduleCache
 
         // Return empty list if cache doesn't exist or failed to load
         _cachedSchedules = new List<BreakSchedule>();
+        try { _lastLoadedFileWriteUtc = File.Exists(_cacheFilePath) ? File.GetLastWriteTimeUtc(_cacheFilePath) : null; } catch { /* ignore */ }
         return _cachedSchedules;
     }
 
@@ -112,6 +136,7 @@ public class BreakScheduleCache
             File.WriteAllText(_cacheFilePath, json);
 
             _cachedSchedules = schedules;
+            try { _lastLoadedFileWriteUtc = File.GetLastWriteTimeUtc(_cacheFilePath); } catch { /* ignore */ }
             _logger?.LogInformation("Saved {Count} break schedules to cache", schedules.Count);
         }
         catch (Exception ex)
@@ -127,6 +152,7 @@ public class BreakScheduleCache
     public void ClearCache()
     {
         _cachedSchedules = null;
+        _lastLoadedFileWriteUtc = null;
     }
 
     /// <summary>

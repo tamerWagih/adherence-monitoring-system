@@ -157,7 +157,7 @@ public class BrowserTabMonitor
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "BrowserTabMonitor tick failed.");
+            _logger.LogWarning(ex, "BrowserTabMonitor tick failed: {Message}", ex.Message);
         }
     }
 
@@ -184,8 +184,15 @@ public class BrowserTabMonitor
             }
         };
 
-        await _buffer.AddAsync(evt, token);
-        _logger.LogDebug("Browser tab changed: {Domain} - {Title}", domain, windowTitle);
+        try
+        {
+            await _buffer.AddAsync(evt, token);
+            _logger.LogDebug("Browser tab changed: {Domain} - {Title}", domain, windowTitle);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to store browser tab change event: {Domain}", domain);
+        }
     }
 
     private static bool IsBrowserProcess(string? processName)

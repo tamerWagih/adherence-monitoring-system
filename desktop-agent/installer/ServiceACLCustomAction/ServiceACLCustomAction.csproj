@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <!-- Find WiX SDK DLL path -->
+  <PropertyGroup>
+    <WixSdkPath Condition="Exists('C:\Program Files (x86)\WiX Toolset v3.14\SDK\Microsoft.Deployment.WindowsInstaller.dll')">C:\Program Files (x86)\WiX Toolset v3.14\SDK\Microsoft.Deployment.WindowsInstaller.dll</WixSdkPath>
+    <WixSdkPath Condition="Exists('C:\Program Files (x86)\WiX Toolset v3.13\SDK\Microsoft.Deployment.WindowsInstaller.dll')">C:\Program Files (x86)\WiX Toolset v3.13\SDK\Microsoft.Deployment.WindowsInstaller.dll</WixSdkPath>
+    <WixSdkPath Condition="Exists('C:\Program Files (x86)\WiX Toolset v3.12\SDK\Microsoft.Deployment.WindowsInstaller.dll')">C:\Program Files (x86)\WiX Toolset v3.12\SDK\Microsoft.Deployment.WindowsInstaller.dll</WixSdkPath>
+    <WixSdkPath Condition="Exists('C:\Program Files (x86)\WiX Toolset v3.11\SDK\Microsoft.Deployment.WindowsInstaller.dll')">C:\Program Files (x86)\WiX Toolset v3.11\SDK\Microsoft.Deployment.WindowsInstaller.dll</WixSdkPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference WiX SDK DLL from WiX installation directory -->
+    <Reference Include="Microsoft.Deployment.WindowsInstaller">
+      <HintPath>$(WixSdkPath)</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
