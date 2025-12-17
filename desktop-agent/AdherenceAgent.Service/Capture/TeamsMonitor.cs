@@ -83,7 +83,7 @@ public class TeamsMonitor
 
     public void Stop()
     {
-        _timer?.Change(Timeout.Infinite, TimeSpan.Zero);
+        _timer?.Change(Timeout.Infinite, Timeout.Infinite);
         _timer?.Dispose();
         _logger.LogInformation("Teams monitoring stopped.");
     }
@@ -270,16 +270,17 @@ public class TeamsMonitor
         await _buffer.AddAsync(evt, token);
     }
 
-    private async Task EndChatAsync(CancellationToken token)
+    private Task EndChatAsync(CancellationToken token)
     {
         if (!_isChatActive)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         _isChatActive = false;
         _chatStartUtc = null;
         _logger.LogDebug("Teams chat ended");
+        return Task.CompletedTask;
     }
 
     private static bool IsTeamsProcess(string? processName)

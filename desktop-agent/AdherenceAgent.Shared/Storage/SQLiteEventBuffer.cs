@@ -125,35 +125,76 @@ public class SQLiteEventBuffer : IEventBuffer
         using var connection = new SQLiteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var cmd = connection.CreateCommand();
-        cmd.CommandText = """
-            SELECT id, event_type, event_timestamp, nt_account, application_name, application_path, window_title, is_work_application, metadata
-            FROM event_buffer
-            WHERE status IN ('PENDING','FAILED')
-              AND retry_count < @maxRetry
-            ORDER BY created_at DESC
-            LIMIT @batchSize;
-            """;
-        cmd.Parameters.AddWithValue("@batchSize", batchSize);
-        cmd.Parameters.AddWithValue("@maxRetry", maxRetryAttempts);
-
-        using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        // Use a transaction to atomically select and mark events to prevent duplicates
+        using var transaction = connection.BeginTransaction();
+        try
         {
-            results.Add(new AdherenceEvent
+            // First, reset any stuck PROCESSING events (older than 5 minutes) back to PENDING
+            // This handles cases where the service crashed or restarted while events were being uploaded
+            var resetCmd = connection.CreateCommand();
+            resetCmd.Transaction = transaction;
+            resetCmd.CommandText = """
+                UPDATE event_buffer
+                SET status = 'PENDING'
+                WHERE status = 'PROCESSING'
+                  AND datetime(created_at) < datetime('now', '-5 minutes');
+                """;
+            await resetCmd.ExecuteNonQueryAsync(cancellationToken);
+
+            // Now select the events we want to process
+            var selectCmd = connection.CreateCommand();
+            selectCmd.Transaction = transaction;
+            selectCmd.CommandText = """
+                SELECT id, event_type, event_timestamp, nt_account, application_name, application_path, window_title, is_work_application, metadata
+                FROM event_buffer
+                WHERE status IN ('PENDING','FAILED')
+                  AND retry_count < @maxRetry
+                ORDER BY created_at DESC
+                LIMIT @batchSize;
+                """;
+            selectCmd.Parameters.AddWithValue("@batchSize", batchSize);
+            selectCmd.Parameters.AddWithValue("@maxRetry", maxRetryAttempts);
+
+            var eventIds = new List<long>();
+            using (var reader = await selectCmd.ExecuteReaderAsync(cancellationToken))
             {
-                Id = reader.GetInt64(0),
-                EventType = reader.GetString(1),
-                EventTimestampUtc = DateTime.Parse(reader.GetString(2)),
-                NtAccount = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
-                ApplicationName = reader.IsDBNull(4) ? null : reader.GetString(4),
-                ApplicationPath = reader.IsDBNull(5) ? null : reader.GetString(5),
-                WindowTitle = reader.IsDBNull(6) ? null : reader.GetString(6),
-                IsWorkApplication = reader.IsDBNull(7) ? null : reader.GetInt32(7) == 1,
-                Metadata = reader.IsDBNull(8)
-                    ? null
-                    : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(reader.GetString(8))
-            });
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var id = reader.GetInt64(0);
+                    eventIds.Add(id);
+                    results.Add(new AdherenceEvent
+                    {
+                        Id = id,
+                        EventType = reader.GetString(1),
+                        EventTimestampUtc = DateTime.Parse(reader.GetString(2)),
+                        NtAccount = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                        ApplicationName = reader.IsDBNull(4) ? null : reader.GetString(4),
+                        ApplicationPath = reader.IsDBNull(5) ? null : reader.GetString(5),
+                        WindowTitle = reader.IsDBNull(6) ? null : reader.GetString(6),
+                        IsWorkApplication = reader.IsDBNull(7) ? null : reader.GetInt32(7) == 1,
+                        Metadata = reader.IsDBNull(8)
+                            ? null
+                            : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(reader.GetString(8))
+                    });
+                }
+            }
+
+            // Mark selected events as 'PROCESSING' to prevent them from being selected again
+            // They will be marked as 'SENT' or 'FAILED' after upload completes
+            if (eventIds.Count > 0)
+            {
+                var updateCmd = connection.CreateCommand();
+                updateCmd.Transaction = transaction;
+                updateCmd.CommandText = $"UPDATE event_buffer SET status = 'PROCESSING' WHERE id IN ({string.Join(",", eventIds)});";
+                await updateCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
         }
 
         return results;
@@ -167,7 +208,7 @@ public class SQLiteEventBuffer : IEventBuffer
         // Count eligible rows (pending or failed)
         var countCmd = connection.CreateCommand();
         countCmd.CommandText = """
-            SELECT COUNT(*) FROM event_buffer WHERE status IN ('PENDING','FAILED');
+            SELECT COUNT(*) FROM event_buffer WHERE status IN ('PENDING','FAILED','PROCESSING');
             """;
         var countObj = await countCmd.ExecuteScalarAsync(cancellationToken);
         var count = Convert.ToInt32(countObj);
@@ -184,7 +225,7 @@ public class SQLiteEventBuffer : IEventBuffer
             DELETE FROM event_buffer
             WHERE id IN (
                 SELECT id FROM event_buffer
-                WHERE status IN ('PENDING','FAILED')
+                WHERE status IN ('PENDING','FAILED','PROCESSING')
                 ORDER BY created_at ASC
                 LIMIT {rowsToDelete}
             );

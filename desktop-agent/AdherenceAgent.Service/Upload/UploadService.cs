@@ -107,10 +107,12 @@ public class UploadService : BackgroundService
                 else
                 {
                     // For 409 Conflict (unmapped NT), mark as failed permanently (don't retry)
+                    // For other failures, mark as failed (will be retried if retry_count < max)
                     var failedEvents = pending.Where(e => e.Id.HasValue).Select(e => e.Id!.Value);
                     var errorMessage = result.StatusCode == HttpStatusCode.Conflict 
                         ? "unmapped_nt_account" 
                         : "upload_failed";
+                    // MarkFailedAsync will change status from 'PROCESSING' to 'FAILED'
                     await _buffer.MarkFailedAsync(failedEvents, errorMessage, stoppingToken);
                     _successStreak = 0;
                     

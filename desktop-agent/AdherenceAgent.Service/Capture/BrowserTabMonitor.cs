@@ -24,10 +24,13 @@ public class BrowserTabMonitor
     private readonly IEventBuffer _buffer;
     private readonly TimeSpan _pollInterval;
     private Timer? _timer;
+    private readonly object _lock = new object();
     private string? _lastBrowserWindowTitle;
     private string? _lastBrowserProcess;
     private string? _lastUrl;
     private string? _lastDomain;
+    private DateTime _lastEventTime = DateTime.MinValue;
+    private readonly TimeSpan _minEventInterval = TimeSpan.FromSeconds(5); // Minimum 5 seconds between events for same domain
 
     // Browser process names
     private static readonly string[] BrowserProcessNames = 
@@ -69,7 +72,7 @@ public class BrowserTabMonitor
 
     public void Stop()
     {
-        _timer?.Change(Timeout.Infinite, TimeSpan.Zero);
+        _timer?.Change(Timeout.Infinite, Timeout.Infinite);
         _timer?.Dispose();
         _logger.LogInformation("Browser tab monitoring stopped.");
     }
@@ -90,33 +93,66 @@ public class BrowserTabMonitor
             if (!IsBrowserProcess(procName))
             {
                 // Reset tracking if we moved away from browser
-                if (_lastBrowserProcess != null)
+                lock (_lock)
                 {
-                    _lastBrowserWindowTitle = null;
-                    _lastBrowserProcess = null;
-                    _lastUrl = null;
-                    _lastDomain = null;
+                    if (_lastBrowserProcess != null)
+                    {
+                        _lastBrowserWindowTitle = null;
+                        _lastBrowserProcess = null;
+                        _lastUrl = null;
+                        _lastDomain = null;
+                    }
                 }
                 return;
             }
 
             // Check if window title changed (indicates tab change)
-            if (windowTitle != _lastBrowserWindowTitle)
+            // Use lock to prevent race conditions
+            bool shouldCreateEvent = false;
+            string? url = null;
+            string? domain = null;
+            
+            lock (_lock)
             {
-                _lastBrowserWindowTitle = windowTitle;
-                _lastBrowserProcess = procName;
-                
-                // Extract URL and domain from window title
-                var (url, domain) = ExtractUrlFromTitle(windowTitle);
-                
-                // Only create event if URL/domain changed
-                if (url != _lastUrl || domain != _lastDomain)
+                if (windowTitle != _lastBrowserWindowTitle)
                 {
-                    _lastUrl = url;
-                    _lastDomain = domain;
+                    // Extract URL and domain from window title
+                    var extracted = ExtractUrlFromTitle(windowTitle);
+                    url = extracted.url;
+                    domain = extracted.domain;
                     
-                    await CreateBrowserTabChangeEventAsync(procName, windowTitle, url, domain, token);
+                    // Debounce: Only create event if:
+                    // 1. Domain changed (different website), OR
+                    // 2. Enough time has passed since last event (prevents spam from dynamic page updates)
+                    var timeSinceLastEvent = DateTime.UtcNow - _lastEventTime;
+                    bool domainChanged = domain != _lastDomain;
+                    bool enoughTimePassed = timeSinceLastEvent >= _minEventInterval;
+                    
+                    if (domainChanged || enoughTimePassed)
+                    {
+                        // Update tracking state IMMEDIATELY to prevent race conditions
+                        // This ensures we don't create duplicate events if TickAsync is called again
+                        // before the async event creation completes
+                        _lastBrowserWindowTitle = windowTitle;
+                        _lastBrowserProcess = procName;
+                        _lastUrl = url;
+                        _lastDomain = domain;
+                        _lastEventTime = DateTime.UtcNow;
+                        shouldCreateEvent = true;
+                    }
+                    else
+                    {
+                        // Update title tracking but don't create event (debouncing)
+                        _lastBrowserWindowTitle = windowTitle;
+                        _lastBrowserProcess = procName;
+                    }
                 }
+            }
+            
+            // Create event outside the lock to avoid blocking
+            if (shouldCreateEvent)
+            {
+                await CreateBrowserTabChangeEventAsync(procName, windowTitle, url, domain, token);
             }
         }
         catch (Exception ex)

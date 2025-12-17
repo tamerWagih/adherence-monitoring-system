@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -14,6 +15,8 @@ namespace AdherenceAgent.Service.Capture;
 
 /// <summary>
 /// Polls the active foreground window and emits WINDOW_CHANGE events when it changes.
+/// Filters out browsers and Teams (covered by specialized monitors) to reduce redundancy.
+/// Focuses on desktop applications (Excel, Word, Outlook, custom apps, etc.).
 /// </summary>
 public class ActiveWindowMonitor
 {
@@ -25,6 +28,19 @@ public class ActiveWindowMonitor
     private IntPtr _lastHandle = IntPtr.Zero;
     private string? _lastWindowTitle;
     private string? _lastProcessPath;
+
+    // Browser process names (filtered - covered by BrowserTabMonitor)
+    private static readonly string[] BrowserProcessNames = 
+    {
+        "chrome",
+        "msedge",
+        "firefox",
+        "brave",
+        "opera"
+    };
+
+    // Teams process names (filtered - covered by TeamsMonitor)
+    private static readonly string[] TeamsProcessNames = { "Teams", "ms-teams" };
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
@@ -47,13 +63,14 @@ public class ActiveWindowMonitor
         _logger = logger;
         _buffer = buffer;
         _classificationCache = classificationCache;
-        _pollInterval = TimeSpan.FromSeconds(Math.Max(2, config.WindowCheckIntervalSeconds));
+        // Use 60 seconds interval (filtered to desktop apps only, reducing event volume)
+        _pollInterval = TimeSpan.FromSeconds(60);
     }
 
     public void Start(CancellationToken token)
     {
         _timer = new Timer(async _ => await TickAsync(token), null, TimeSpan.Zero, _pollInterval);
-        _logger.LogInformation("Active window monitoring started (interval {Interval}s).", _pollInterval.TotalSeconds);
+        _logger.LogInformation("Active window monitoring started (interval {Interval}s, filtering browsers and Teams).", _pollInterval.TotalSeconds);
     }
 
     public void Stop()
@@ -75,6 +92,18 @@ public class ActiveWindowMonitor
 
             var title = GetWindowTitle(hWnd);
             var (procName, procPath) = GetProcessInfo(hWnd);
+
+            // Skip browsers - covered by BrowserTabMonitor
+            if (IsBrowserProcess(procName))
+            {
+                return;
+            }
+
+            // Skip Teams - covered by TeamsMonitor
+            if (IsTeamsProcess(procName))
+            {
+                return;
+            }
 
             // Debounce identical window titles/paths even if handle changed (rare)
             if (title == _lastWindowTitle && procPath == _lastProcessPath)
@@ -126,6 +155,42 @@ public class ActiveWindowMonitor
         var builder = new StringBuilder(length + 1);
         GetWindowText(hWnd, builder, builder.Capacity);
         return builder.ToString();
+    }
+
+    private static bool IsBrowserProcess(string? processName)
+    {
+        if (string.IsNullOrEmpty(processName))
+        {
+            return false;
+        }
+
+        foreach (var browserName in BrowserProcessNames)
+        {
+            if (processName.Contains(browserName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsTeamsProcess(string? processName)
+    {
+        if (string.IsNullOrEmpty(processName))
+        {
+            return false;
+        }
+
+        foreach (var teamsName in TeamsProcessNames)
+        {
+            if (processName.Contains(teamsName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static (string? name, string? path) GetProcessInfo(IntPtr hWnd)
