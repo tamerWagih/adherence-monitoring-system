@@ -83,8 +83,11 @@ export class AgentAdherenceSummary {
   @Column({ name: 'adherence_percentage', type: 'decimal', precision: 5, scale: 2, nullable: true })
   adherencePercentage?: number;
 
-  @Column({ name: 'exceptions_count', type: 'int', default: 0 })
-  exceptionsCount: number;
+  // Note: exceptions_count column doesn't exist in database schema
+  // Database has exception_adjustments JSONB instead
+  // Setting select: false to prevent TypeORM from trying to select non-existent column
+  @Column({ name: 'exceptions_count', type: 'int', nullable: true, select: false })
+  exceptionsCount?: number;
 
   @Column({ name: 'calculated_at', type: 'timestamptz', nullable: true })
   calculatedAt?: Date;

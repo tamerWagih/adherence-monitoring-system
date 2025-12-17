@@ -95,7 +95,7 @@ export class AgentStatusService {
                 : null,
               scheduledMinutes: adherence.scheduledDurationMinutes,
               actualMinutes: adherence.actualDurationMinutes,
-              exceptionsCount: adherence.exceptionsCount,
+              exceptionsCount: adherence.exceptionsCount ?? 0, // Default to 0 if not available
               scheduleDate: adherence.scheduleDate,
             }
           : null,
