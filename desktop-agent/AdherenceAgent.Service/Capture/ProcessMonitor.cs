@@ -368,6 +368,9 @@ public class ProcessMonitor
             // Update services
             "wuauclt", "WaaSMedicSvc", "usoclient", "updater",
             
+            // Hardware support tools
+            "SupportAssistInstaller", "SupportAssistI", "SupportAssist",
+            
             // Other system utilities
             "cmd", "powershell", "pwsh", "wscript", "cscript", "regsvr32"
         };

@@ -29,6 +29,7 @@ public class TrayAppContext : ApplicationContext
     private readonly BreakScheduleCache _breakScheduleCache = new();
     private const string ServiceName = "AdherenceAgentService";
     private long _lastProcessedBreakEventId = 0; // Track last processed break event to avoid duplicates
+    private DateTime _trayAppStartTime = DateTime.UtcNow; // Track when tray app started to avoid showing old events
 
     public TrayAppContext()
     {
@@ -551,7 +552,7 @@ public class TrayAppContext : ApplicationContext
             using var connection = new System.Data.SQLite.SQLiteConnection($"Data Source={PathProvider.DatabaseFile};Pooling=true");
             connection.Open();
 
-            // Query for break events newer than last processed AND within the last 5 minutes
+            // Query for break events newer than last processed AND created after tray app started
             // This prevents showing notifications for old events when the tray app restarts
             using var cmd = connection.CreateCommand();
             cmd.CommandText = @"
@@ -559,11 +560,12 @@ public class TrayAppContext : ApplicationContext
                 FROM event_buffer 
                 WHERE event_type IN ('BREAK_START', 'BREAK_END') 
                   AND id > @lastId
-                  AND datetime(event_timestamp) > datetime('now', '-5 minutes')
+                  AND datetime(event_timestamp) > datetime(@startTime)
                 ORDER BY id ASC
                 LIMIT 10";
 
             cmd.Parameters.AddWithValue("@lastId", _lastProcessedBreakEventId);
+            cmd.Parameters.AddWithValue("@startTime", _trayAppStartTime.ToString("yyyy-MM-dd HH:mm:ss"));
             
             using var reader = cmd.ExecuteReader();
             while (reader.Read())

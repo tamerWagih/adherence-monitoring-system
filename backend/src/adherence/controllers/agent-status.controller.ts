@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards, Request, Query } from '@nestjs/common';
+import { Controller, Get, UseGuards, Request, Query, Logger } from '@nestjs/common';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { AgentStatusService } from '../services/agent-status.service';
 
@@ -14,6 +14,8 @@ import { AgentStatusService } from '../services/agent-status.service';
 @Controller('agent')
 @UseGuards(JwtAuthGuard)
 export class AgentStatusController {
+  private readonly logger = new Logger(AgentStatusController.name);
+
   constructor(private agentStatusService: AgentStatusService) {}
 
   /**
@@ -34,21 +36,26 @@ export class AgentStatusController {
    */
   @Get('status')
   async getAgentStatus(@Request() req: any, @Query('nt') ntAccount?: string) {
-    // TODO Week 5: Extract NT account from JWT token
-    // For now, accept as query parameter for testing
-    // const ntAccount = req.user.nt; // Will be available after JWT implementation
+    try {
+      // TODO Week 5: Extract NT account from JWT token
+      // For now, accept as query parameter for testing
+      // const ntAccount = req.user.nt; // Will be available after JWT implementation
 
-    if (!ntAccount) {
-      // In Week 5, this will come from JWT token
-      // For now, return error if not provided
-      return {
-        ntMapped: false,
-        warning: 'NT account not provided. In Week 5, this will be extracted from JWT token.',
-        workstation: null,
-        adherence: null,
-      };
+      if (!ntAccount) {
+        // In Week 5, this will come from JWT token
+        // For now, return error if not provided
+        return {
+          ntMapped: false,
+          warning: 'NT account not provided. In Week 5, this will be extracted from JWT token.',
+          workstation: null,
+          adherence: null,
+        };
+      }
+
+      return await this.agentStatusService.getAgentStatusByNt(ntAccount);
+    } catch (error) {
+      this.logger.error(`Error getting agent status for NT: ${ntAccount}`, error);
+      throw error;
     }
-
-    return this.agentStatusService.getAgentStatusByNt(ntAccount);
   }
 }
