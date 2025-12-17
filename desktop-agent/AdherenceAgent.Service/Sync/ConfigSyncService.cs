@@ -152,10 +152,6 @@ public class ConfigSyncService : BackgroundService
                         configData.BatchSize ?? _config.BatchSize,
                         configData.SyncIntervalSeconds ?? _config.SyncIntervalSeconds,
                         configData.IdleThresholdMinutes ?? _config.IdleThresholdMinutes);
-                    
-                    // Note: Dynamic configuration updates would require refactoring to inject a ConfigurationManager.
-                    // For now, these values are logged but not applied dynamically.
-                    // To apply changes, restart the service or implement a ConfigurationManager service.
                 }
 
                 if (configData?.ApplicationClassifications != null)

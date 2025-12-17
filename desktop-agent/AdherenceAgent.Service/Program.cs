@@ -77,6 +77,17 @@ var host = Host.CreateDefaultBuilder(args)
             provider.GetRequiredService<BreakDetector>()));
         services.AddSingleton<SessionSwitchMonitor>();
         services.AddSingleton<ActiveWindowMonitor>();
+        services.AddSingleton<TeamsMonitor>(provider => new TeamsMonitor(
+            provider.GetRequiredService<ILogger<TeamsMonitor>>(),
+            provider.GetRequiredService<IEventBuffer>(),
+            agentConfig));
+        services.AddSingleton<BrowserTabMonitor>(provider => new BrowserTabMonitor(
+            provider.GetRequiredService<ILogger<BrowserTabMonitor>>(),
+            provider.GetRequiredService<IEventBuffer>(),
+            agentConfig));
+        services.AddSingleton<ProcessMonitor>(provider => new ProcessMonitor(
+            provider.GetRequiredService<ILogger<ProcessMonitor>>(),
+            provider.GetRequiredService<IEventBuffer>()));
         services.AddSingleton<CredentialStore>();
         services.AddHttpClient("adherence");
         services.AddHostedService<EventCaptureService>();
