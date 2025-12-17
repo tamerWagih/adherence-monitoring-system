@@ -9,9 +9,11 @@ import { EmployeePersonalInfo } from '../entities/employee-personal-info.entity'
 import { AgentSchedule } from '../entities/agent-schedule.entity';
 import { EventsController } from './controllers/events.controller';
 import { WorkstationConfigController } from './controllers/workstation-config.controller';
+import { AgentStatusController } from './controllers/agent-status.controller';
 import { EventIngestionService } from './services/event-ingestion.service';
 import { WorkstationConfigService } from './services/workstation-config.service';
 import { WorkstationAuthService } from './services/workstation-auth.service';
+import { AgentStatusService } from './services/agent-status.service';
 
 /**
  * AdherenceModule
@@ -38,11 +40,12 @@ import { WorkstationAuthService } from './services/workstation-auth.service';
       AgentSchedule, // For break schedule queries
     ]),
   ],
-  controllers: [EventsController, WorkstationConfigController],
+  controllers: [EventsController, WorkstationConfigController, AgentStatusController],
   providers: [
     EventIngestionService,
     WorkstationConfigService,
     WorkstationAuthService,
+    AgentStatusService,
   ],
   exports: [WorkstationAuthService], // Export for use in guards
 })

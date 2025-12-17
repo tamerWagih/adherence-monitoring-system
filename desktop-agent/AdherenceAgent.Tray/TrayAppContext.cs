@@ -8,6 +8,7 @@ using AdherenceAgent.Shared.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.ServiceProcess;
 using AdherenceAgent.Shared.Security;
+using System.Security.Principal;
 
 namespace AdherenceAgent.Tray;
 
@@ -50,14 +51,40 @@ public class TrayAppContext : ApplicationContext
         menu.Items.Add("Status", null, (_, _) => ShowStatus());
         menu.Items.Add("Test API Connection", null, async (_, _) => await TestApiAsync());
         menu.Items.Add("Add Test Event", null, async (_, _) => await AddTestEventAsync());
-        menu.Items.Add("Set Credentials...", null, (_, _) => SetCredentials());
+        
+        // Only administrators can set credentials (security requirement)
+        if (IsCurrentUserAdministrator())
+        {
+            menu.Items.Add("Set Credentials...", null, (_, _) => SetCredentials());
+        }
+        
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Start Service", null, (_, _) => ControlService(ServiceControllerStatus.Running));
-        menu.Items.Add("Stop Service", null, (_, _) => ControlService(ServiceControllerStatus.Stopped));
+        
+        // Only administrators can stop service (security requirement)
+        if (IsCurrentUserAdministrator())
+        {
+            menu.Items.Add("Stop Service", null, (_, _) => ControlService(ServiceControllerStatus.Stopped));
+        }
+        
         menu.Items.Add("Open Logs Folder", null, (_, _) => OpenLogs());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
         return menu;
+    }
+    
+    private static bool IsCurrentUserAdministrator()
+    {
+        try
+        {
+            var principal = new WindowsPrincipal(WindowsIdentity.GetCurrent());
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            // If we can't determine, assume non-admin for security
+            return false;
+        }
     }
 
     private void LoadConfig()
