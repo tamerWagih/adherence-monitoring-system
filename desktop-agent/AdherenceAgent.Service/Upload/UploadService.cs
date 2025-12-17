@@ -82,7 +82,9 @@ public class UploadService : BackgroundService
                 var pending = await _buffer.GetPendingAsync(_currentBatchSize, _config.MaxRetryAttempts, stoppingToken);
                 if (pending.Count == 0)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(_currentIntervalSeconds), stoppingToken);
+                    // Use staggered interval even when no pending events
+                    var delay = CalculateStaggeredInterval();
+                    await Task.Delay(TimeSpan.FromSeconds(delay), stoppingToken);
                     continue;
                 }
 
@@ -222,6 +224,7 @@ public class UploadService : BackgroundService
         var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         var contentString = JsonSerializer.Serialize(payload, jsonOptions);
 
+        bool lastErrorWasNetwork = false;
         for (int attempt = 0; attempt <= _backoffSeconds.Length; attempt++)
         {
             try
@@ -258,6 +261,7 @@ public class UploadService : BackgroundService
                     var delay = retryAfter + jitter;
                     _logger.LogWarning("Upload throttled ({Status}). Retrying in {Delay}s", response.StatusCode, delay.TotalSeconds);
                     await Task.Delay(delay, token);
+                    lastErrorWasNetwork = false;
                     continue;
                 }
 
@@ -266,6 +270,7 @@ public class UploadService : BackgroundService
             }
             catch (HttpRequestException ex)
             {
+                lastErrorWasNetwork = true;
                 _consecutiveNetworkErrors++;
                 
                 // Check if we've hit network outage threshold
@@ -293,11 +298,18 @@ public class UploadService : BackgroundService
                         attempt + 1, delay.TotalSeconds);
                     await Task.Delay(delay, token);
                 }
+                
+                // If this was the last attempt, return network error
+                if (attempt >= _backoffSeconds.Length)
+                {
+                    return UploadResult.NetworkError();
+                }
                 continue;
             }
         }
 
-        return UploadResult.Failed(null);
+        // If we exhausted retries and last error was network, return network error
+        return lastErrorWasNetwork ? UploadResult.NetworkError() : UploadResult.Failed(null);
     }
 
     private record UploadResult(bool Success, bool IsRateLimited, bool IsNetworkError, HttpStatusCode? StatusCode)
