@@ -75,10 +75,28 @@ public class LoginLogoffMonitor
             // Extract NT account from Security Event Log
             var ntAccount = ExtractNtAccountFromEvent(record);
             
-            // Fallback to current session if extraction fails
+            // Filter out SYSTEM account and other service accounts
+            if (string.IsNullOrEmpty(ntAccount) || 
+                ntAccount.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase) ||
+                ntAccount.Equals("LOCAL SERVICE", StringComparison.OrdinalIgnoreCase) ||
+                ntAccount.Equals("NETWORK SERVICE", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("Skipping {EventType} event for system account: {NtAccount}", eventType, ntAccount ?? "unknown");
+                return;
+            }
+            
+            // Fallback to current session if extraction fails (but only if not a system account)
             if (string.IsNullOrEmpty(ntAccount))
             {
                 ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
+                // Double-check it's not a system account
+                if (ntAccount.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase) ||
+                    ntAccount.Equals("LOCAL SERVICE", StringComparison.OrdinalIgnoreCase) ||
+                    ntAccount.Equals("NETWORK SERVICE", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("Skipping {EventType} event - current session is system account", eventType);
+                    return;
+                }
                 _logger.LogWarning("Could not extract NT account from Security Event Log, using current session: {NtAccount}", ntAccount);
             }
 

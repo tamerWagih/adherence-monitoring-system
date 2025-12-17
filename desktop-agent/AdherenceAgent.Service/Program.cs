@@ -67,6 +67,10 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<BreakScheduleCache>(provider =>
             new BreakScheduleCache(provider.GetService<ILogger<BreakScheduleCache>>()));
         services.AddSingleton<BreakDetector>();
+        services.AddSingleton<BreakAlertMonitor>(provider => new BreakAlertMonitor(
+            provider.GetRequiredService<ILogger<BreakAlertMonitor>>(),
+            provider.GetRequiredService<IEventBuffer>(),
+            provider.GetRequiredService<BreakScheduleCache>()));
         services.AddSingleton<LoginLogoffMonitor>();
         services.AddSingleton(provider => new IdleMonitor(
             provider.GetRequiredService<ILogger<IdleMonitor>>(),

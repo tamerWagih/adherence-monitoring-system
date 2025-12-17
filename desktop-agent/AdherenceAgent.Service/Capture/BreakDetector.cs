@@ -79,17 +79,28 @@ public class BreakDetector
 
             if (activeSchedule != null)
             {
-                _logger.LogDebug(
-                    "Active break schedule found: {ScheduleId} ({StartTime}-{EndTime})",
-                    activeSchedule.Id, activeSchedule.StartTime, activeSchedule.EndTime);
+                _logger.LogInformation(
+                    "Active break schedule found: {ScheduleId} ({StartTime}-{EndTime}), currentTime={CurrentTime}",
+                    activeSchedule.Id, activeSchedule.StartTime, activeSchedule.EndTime, currentTimeOfDay);
 
                 // We're in a scheduled break window
+                // If user is idle (even briefly) during break window, detect break immediately
+                // This allows break detection as soon as break window starts and user becomes idle
                 if (isIdle && idleDurationMinutes >= MinIdleMinutesForBreak && !_isOnBreak)
                 {
                     _logger.LogInformation(
                         "Break start conditions met: idle={IsIdle}, duration={Duration}min (min={Min}min), onBreak={OnBreak}",
                         isIdle, idleDurationMinutes, MinIdleMinutesForBreak, _isOnBreak);
                     // Break started: user is idle during break window
+                    await StartBreakAsync(activeSchedule, idleStartUtc ?? DateTime.UtcNow);
+                }
+                else if (isIdle && idleDurationMinutes >= 0.5 && !_isOnBreak)
+                {
+                    // More lenient: if user is idle for at least 30 seconds during break window, detect break
+                    // This allows immediate detection when break window starts
+                    _logger.LogInformation(
+                        "Break start detected (lenient): idle={IsIdle}, duration={Duration}min, onBreak={OnBreak}",
+                        isIdle, idleDurationMinutes, _isOnBreak);
                     await StartBreakAsync(activeSchedule, idleStartUtc ?? DateTime.UtcNow);
                 }
                 else if (!isIdle && _isOnBreak)
@@ -99,8 +110,8 @@ public class BreakDetector
                 }
                 else
                 {
-                    _logger.LogDebug(
-                        "Break start conditions not met: idle={IsIdle}, duration={Duration}min (need {Min}min), onBreak={OnBreak}",
+                    _logger.LogInformation(
+                        "Break window active but conditions not met: idle={IsIdle}, duration={Duration}min (need {Min}min), onBreak={OnBreak}",
                         isIdle, idleDurationMinutes, MinIdleMinutesForBreak, _isOnBreak);
                 }
             }
@@ -207,6 +218,7 @@ public class BreakDetector
                 { "scheduled_start_time", schedule.StartTime },
                 { "scheduled_end_time", schedule.EndTime },
                 { "scheduled_duration_minutes", schedule.BreakDurationMinutes },
+                { "is_alert", false }, // This is actual break detection based on idle, not just an alert
             }
         }, CancellationToken.None);
 

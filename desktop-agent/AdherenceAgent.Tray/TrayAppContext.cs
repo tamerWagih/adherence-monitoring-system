@@ -10,6 +10,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.ServiceProcess;
 using AdherenceAgent.Shared.Security;
 using System.Security.Principal;
+using System.Media;
+using System.Linq;
 
 namespace AdherenceAgent.Tray;
 
@@ -21,8 +23,10 @@ public class TrayAppContext : ApplicationContext
     private readonly Icon _iconRed;
     private readonly System.Windows.Forms.Timer _statusTimer;
     private readonly System.Windows.Forms.Timer _breakNotificationTimer;
+    private readonly System.Windows.Forms.Timer _menuRefreshTimer;
     private AgentConfig _config = new();
     private readonly CredentialStore _credentialStore = new();
+    private readonly BreakScheduleCache _breakScheduleCache = new();
     private const string ServiceName = "AdherenceAgentService";
     private long _lastProcessedBreakEventId = 0; // Track last processed break event to avoid duplicates
 
@@ -46,6 +50,14 @@ public class TrayAppContext : ApplicationContext
         _statusTimer = new System.Windows.Forms.Timer { Interval = 30_000 }; // 30s
         _statusTimer.Tick += (_, _) => UpdateStatusIcon();
         _statusTimer.Start();
+
+        _breakNotificationTimer = new System.Windows.Forms.Timer { Interval = 10_000 }; // 10s
+        _breakNotificationTimer.Tick += (_, _) => CheckBreakEvents();
+        _breakNotificationTimer.Start();
+
+        _menuRefreshTimer = new System.Windows.Forms.Timer { Interval = 60_000 }; // 60s - refresh menu every minute
+        _menuRefreshTimer.Tick += (_, _) => RefreshMenu();
+        _menuRefreshTimer.Start();
     }
 
     private ContextMenuStrip BuildMenu()
@@ -55,6 +67,9 @@ public class TrayAppContext : ApplicationContext
         
         // Status is always visible (read-only information)
         menu.Items.Add("Status", null, (_, _) => ShowStatus());
+        
+        // Add break schedule information
+        AddBreakScheduleMenuItems(menu);
         
         // Admin-only actions
         if (isAdmin)
@@ -74,6 +89,138 @@ public class TrayAppContext : ApplicationContext
         // Note: They cannot exit the tray app to maintain status visibility
         
         return menu;
+    }
+
+    /// <summary>
+    /// Add break schedule menu items (upcoming and ongoing breaks).
+    /// </summary>
+    private void AddBreakScheduleMenuItems(ContextMenuStrip menu)
+    {
+        try
+        {
+            var schedules = _breakScheduleCache.GetSchedules();
+            if (schedules.Count == 0)
+            {
+                return;
+            }
+
+            var currentTime = DateTime.Now;
+            var currentTimeOfDay = currentTime.TimeOfDay;
+            var upcomingBreaks = new List<BreakSchedule>();
+            var ongoingBreaks = new List<BreakSchedule>();
+
+            foreach (var schedule in schedules)
+            {
+                if (TryParseTime(schedule.StartTime, out var startTime) &&
+                    TryParseTime(schedule.EndTime, out var endTime))
+                {
+                    if (currentTimeOfDay >= startTime && currentTimeOfDay <= endTime)
+                    {
+                        ongoingBreaks.Add(schedule);
+                    }
+                    else if (currentTimeOfDay < startTime)
+                    {
+                        upcomingBreaks.Add(schedule);
+                    }
+                }
+            }
+
+            // Sort upcoming breaks by start time
+            upcomingBreaks = upcomingBreaks.OrderBy(b => TryParseTime(b.StartTime, out var st) ? st : TimeSpan.MaxValue).ToList();
+
+            if (ongoingBreaks.Count > 0 || upcomingBreaks.Count > 0)
+            {
+                menu.Items.Add(new ToolStripSeparator());
+                
+                if (ongoingBreaks.Count > 0)
+                {
+                    menu.Items.Add("🟢 Ongoing Breaks:", null, null).Enabled = false;
+                    foreach (var breakSchedule in ongoingBreaks)
+                    {
+                        var timeRemaining = "";
+                        if (TryParseTime(breakSchedule.EndTime, out var endTime))
+                        {
+                            var remaining = endTime - currentTimeOfDay;
+                            if (remaining.TotalMinutes > 0)
+                            {
+                                timeRemaining = $" ({remaining.TotalMinutes:F0} min remaining)";
+                            }
+                        }
+                        menu.Items.Add($"  • {breakSchedule.StartTime} - {breakSchedule.EndTime}{timeRemaining}", null, null).Enabled = false;
+                    }
+                }
+
+                if (upcomingBreaks.Count > 0)
+                {
+                    if (ongoingBreaks.Count > 0)
+                    {
+                        menu.Items.Add(new ToolStripSeparator());
+                    }
+                    menu.Items.Add("⏰ Upcoming Breaks:", null, null).Enabled = false;
+                    foreach (var breakSchedule in upcomingBreaks.Take(5)) // Show max 5 upcoming
+                    {
+                        var timeUntil = "";
+                        if (TryParseTime(breakSchedule.StartTime, out var startTime))
+                        {
+                            var until = startTime - currentTimeOfDay;
+                            if (until.TotalMinutes > 0)
+                            {
+                                if (until.TotalHours >= 1)
+                                {
+                                    timeUntil = $" (in {until.Hours}h {until.Minutes}m)";
+                                }
+                                else
+                                {
+                                    timeUntil = $" (in {until.TotalMinutes:F0} min)";
+                                }
+                            }
+                        }
+                        menu.Items.Add($"  • {breakSchedule.StartTime} - {breakSchedule.EndTime}{timeUntil}", null, null).Enabled = false;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Silently ignore errors loading break schedules
+        }
+    }
+
+    /// <summary>
+    /// Parse time string (HH:mm:ss or HH:mm) to TimeSpan.
+    /// </summary>
+    private bool TryParseTime(string timeStr, out TimeSpan timeSpan)
+    {
+        timeSpan = TimeSpan.Zero;
+
+        if (string.IsNullOrWhiteSpace(timeStr))
+        {
+            return false;
+        }
+
+        var parts = timeStr.Split(':');
+        if (parts.Length < 2)
+        {
+            return false;
+        }
+
+        if (int.TryParse(parts[0], out var hours) &&
+            int.TryParse(parts[1], out var minutes))
+        {
+            var seconds = parts.Length > 2 && int.TryParse(parts[2], out var s) ? s : 0;
+            timeSpan = new TimeSpan(hours, minutes, seconds);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Refresh the context menu (to update break schedule information).
+    /// </summary>
+    private void RefreshMenu()
+    {
+        _notifyIcon.ContextMenuStrip = BuildMenu();
     }
     
     private static bool IsCurrentUserAdministrator()
@@ -296,6 +443,7 @@ public class TrayAppContext : ApplicationContext
     {
         _statusTimer?.Stop();
         _breakNotificationTimer?.Stop();
+        _menuRefreshTimer?.Stop();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _iconGreen.Dispose();
@@ -403,13 +551,15 @@ public class TrayAppContext : ApplicationContext
             using var connection = new System.Data.SQLite.SQLiteConnection($"Data Source={PathProvider.DatabaseFile};Pooling=true");
             connection.Open();
 
-            // Query for break events newer than last processed
+            // Query for break events newer than last processed AND within the last 5 minutes
+            // This prevents showing notifications for old events when the tray app restarts
             using var cmd = connection.CreateCommand();
             cmd.CommandText = @"
                 SELECT id, event_type, event_timestamp, metadata 
                 FROM event_buffer 
                 WHERE event_type IN ('BREAK_START', 'BREAK_END') 
                   AND id > @lastId
+                  AND datetime(event_timestamp) > datetime('now', '-5 minutes')
                 ORDER BY id ASC
                 LIMIT 10";
 
@@ -449,14 +599,35 @@ public class TrayAppContext : ApplicationContext
                     }
                 }
 
+                // Check if this is an alert or actual break detection
+                bool isAlert = false;
+                if (metadata != null && metadata.TryGetValue("is_alert", out var alertFlag))
+                {
+                    isAlert = alertFlag?.ToString()?.ToLower() == "true";
+                }
+
                 // Show notification based on event type
                 if (eventType == EventTypes.BreakStart)
                 {
-                    ShowBreakStartNotification(metadata);
+                    if (isAlert)
+                    {
+                        ShowBreakWindowAlertNotification(metadata, true);
+                    }
+                    else
+                    {
+                        ShowBreakStartNotification(eventTimestamp, metadata);
+                    }
                 }
                 else if (eventType == EventTypes.BreakEnd)
                 {
-                    ShowBreakEndNotification(metadata);
+                    if (isAlert)
+                    {
+                        ShowBreakWindowAlertNotification(metadata, false);
+                    }
+                    else
+                    {
+                        ShowBreakEndNotification(metadata);
+                    }
                 }
             }
         }
@@ -467,26 +638,38 @@ public class TrayAppContext : ApplicationContext
     }
 
     /// <summary>
-    /// Show notification when break starts.
+    /// Show alert notification when break window starts/ends (scheduled break reminder).
     /// </summary>
-    private void ShowBreakStartNotification(Dictionary<string, object>? metadata)
+    private void ShowBreakWindowAlertNotification(Dictionary<string, object>? metadata, bool isStart)
     {
-        string title = "Break Started";
-        string message = "Your break has been detected.";
+        string title = isStart ? "Break Window Started" : "Break Window Ended";
+        string message = isStart 
+            ? "Your scheduled break window has started." 
+            : "Your scheduled break window has ended.";
 
         if (metadata != null)
         {
-            if (metadata.TryGetValue("scheduled_start_time", out var startTime) && startTime != null)
+            if (isStart)
             {
-                message = $"Break started at {startTime}.";
-            }
-
-            if (metadata.TryGetValue("scheduled_duration_minutes", out var duration) && duration != null)
-            {
-                var durationStr = duration.ToString();
-                if (int.TryParse(durationStr, out var durationMinutes))
+                if (metadata.TryGetValue("scheduled_start_time", out var startTime) && startTime != null)
                 {
-                    message += $" Scheduled duration: {durationMinutes} minutes.";
+                    message = $"Break window started at {startTime}.";
+                }
+
+                if (metadata.TryGetValue("scheduled_duration_minutes", out var duration) && duration != null)
+                {
+                    var durationStr = duration.ToString();
+                    if (int.TryParse(durationStr, out var durationMinutes))
+                    {
+                        message += $" Duration: {durationMinutes} minutes.";
+                    }
+                }
+            }
+            else
+            {
+                if (metadata.TryGetValue("scheduled_end_time", out var endTime) && endTime != null)
+                {
+                    message = $"Break window ended at {endTime}.";
                 }
             }
         }
@@ -494,7 +677,60 @@ public class TrayAppContext : ApplicationContext
         _notifyIcon.BalloonTipTitle = title;
         _notifyIcon.BalloonTipText = message;
         _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+        
+        // Play sound notification
+        SystemSounds.Asterisk.Play();
+        
         _notifyIcon.ShowBalloonTip(5000); // Show for 5 seconds
+        
+        // Refresh menu to show updated break status
+        RefreshMenu();
+    }
+
+    /// <summary>
+    /// Show notification when break starts (actual break detection based on idle).
+    /// </summary>
+    private void ShowBreakStartNotification(string eventTimestamp, Dictionary<string, object>? metadata)
+    {
+        string title = "Break Started";
+        string message = "Your break has been detected.";
+
+        // Parse the actual break start time from event_timestamp
+        if (DateTime.TryParse(eventTimestamp, out var actualStartTime))
+        {
+            var localTime = actualStartTime.ToLocalTime();
+            message = $"Break started at {localTime:HH:mm:ss}.";
+        }
+
+        // Add scheduled break information if available
+        if (metadata != null)
+        {
+            if (metadata.TryGetValue("scheduled_start_time", out var scheduledStartTime) && scheduledStartTime != null)
+            {
+                message += $" Scheduled break: {scheduledStartTime}";
+            }
+
+            if (metadata.TryGetValue("scheduled_duration_minutes", out var duration) && duration != null)
+            {
+                var durationStr = duration.ToString();
+                if (int.TryParse(durationStr, out var durationMinutes))
+                {
+                    message += $" ({durationMinutes} min).";
+                }
+            }
+        }
+
+        _notifyIcon.BalloonTipTitle = title;
+        _notifyIcon.BalloonTipText = message;
+        _notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+        
+        // Play sound notification
+        SystemSounds.Exclamation.Play();
+        
+        _notifyIcon.ShowBalloonTip(5000); // Show for 5 seconds
+        
+        // Refresh menu to show updated break status
+        RefreshMenu();
     }
 
     /// <summary>
@@ -543,7 +779,21 @@ public class TrayAppContext : ApplicationContext
 
         _notifyIcon.BalloonTipTitle = title;
         _notifyIcon.BalloonTipText = message;
+        
+        // Play sound notification (Warning sound for break end with exceeded duration)
+        if (_notifyIcon.BalloonTipIcon == ToolTipIcon.Warning)
+        {
+            SystemSounds.Hand.Play();
+        }
+        else
+        {
+            SystemSounds.Asterisk.Play();
+        }
+        
         _notifyIcon.ShowBalloonTip(5000); // Show for 5 seconds
+        
+        // Refresh menu to show updated break status
+        RefreshMenu();
     }
 
     private static Icon CreateCircleIcon(Color color)

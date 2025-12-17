@@ -366,7 +366,7 @@ public class ProcessMonitor
             "MsMpEng", "NisSrv", "SecurityHealthService",
             
             // Update services
-            "wuauclt", "WaaSMedicSvc", "usoclient",
+            "wuauclt", "WaaSMedicSvc", "usoclient", "updater",
             
             // Other system utilities
             "cmd", "powershell", "pwsh", "wscript", "cscript", "regsvr32"

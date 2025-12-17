@@ -112,6 +112,12 @@ public class IdleMonitor
                 var totalIdle = _idleStartUtc.HasValue ? (DateTime.UtcNow - _idleStartUtc.Value) : idleTime;
                 await _breakDetector.CheckBreakStatusAsync(true, _idleStartUtc, totalIdle.TotalMinutes);
             }
+            else if (!_isIdle && _breakDetector != null)
+            {
+                // Also check break status when not idle (in case break window starts and user becomes idle)
+                // This ensures break windows are detected even if user is active when window starts
+                await _breakDetector.CheckBreakStatusAsync(false, null, 0);
+            }
         }
         catch (Exception ex)
         {

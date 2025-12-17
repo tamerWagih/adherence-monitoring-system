@@ -18,6 +18,7 @@ public class EventCaptureService : BackgroundService
     private readonly TeamsMonitor? _teamsMonitor;
     private readonly BrowserTabMonitor? _browserTabMonitor;
     private readonly ProcessMonitor? _processMonitor;
+    private readonly BreakAlertMonitor? _breakAlertMonitor;
 
     public EventCaptureService(
         ILogger<EventCaptureService> logger,
@@ -27,7 +28,8 @@ public class EventCaptureService : BackgroundService
         ActiveWindowMonitor windowMonitor,
         TeamsMonitor? teamsMonitor = null,
         BrowserTabMonitor? browserTabMonitor = null,
-        ProcessMonitor? processMonitor = null)
+        ProcessMonitor? processMonitor = null,
+        BreakAlertMonitor? breakAlertMonitor = null)
     {
         _logger = logger;
         _loginMonitor = loginMonitor;
@@ -37,6 +39,7 @@ public class EventCaptureService : BackgroundService
         _teamsMonitor = teamsMonitor;
         _browserTabMonitor = browserTabMonitor;
         _processMonitor = processMonitor;
+        _breakAlertMonitor = breakAlertMonitor;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -51,6 +54,9 @@ public class EventCaptureService : BackgroundService
         _teamsMonitor?.Start(stoppingToken);
         _browserTabMonitor?.Start(stoppingToken);
         _processMonitor?.Start(stoppingToken);
+        
+        // Start break alert monitor (for scheduled break notifications)
+        _breakAlertMonitor?.Start(stoppingToken);
         
         return Task.CompletedTask;
     }
@@ -67,6 +73,9 @@ public class EventCaptureService : BackgroundService
         _teamsMonitor?.Stop();
         _browserTabMonitor?.Stop();
         _processMonitor?.Stop();
+        
+        // Stop break alert monitor
+        _breakAlertMonitor?.Stop();
         
         return base.StopAsync(cancellationToken);
     }
