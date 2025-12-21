@@ -29,6 +29,7 @@ public class TrayAppContext : ApplicationContext
     private readonly CredentialStore _credentialStore = new();
     private readonly BreakScheduleCache _breakScheduleCache = new();
     private readonly ClassificationCache _classificationCache = new();
+    private readonly ClientWebsiteCache _clientWebsiteCache = new();
     private const string ServiceName = "AdherenceAgentService";
     private long _lastProcessedBreakEventId = 0; // Track last processed break event to avoid duplicates
     private DateTime _trayAppStartTime = DateTime.UtcNow; // Track when tray app started to avoid showing old events
@@ -76,7 +77,7 @@ public class TrayAppContext : ApplicationContext
             }
             if (last != null) throw last;
 
-            _interactiveCapture = new TrayInteractiveCapture(_config, _trayBuffer, _classificationCache);
+            _interactiveCapture = new TrayInteractiveCapture(_config, _trayBuffer, _classificationCache, _clientWebsiteCache);
             _interactiveCapture.Start();
 
             try

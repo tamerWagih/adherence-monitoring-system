@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Raw } from 'typeorm';
 import { ApplicationClassification } from '../../entities/application-classification.entity';
+import { ClientWebsite } from '../../entities/client-website.entity';
 import { AgentWorkstationConfiguration } from '../../entities/agent-workstation-configuration.entity';
 import { EmployeePersonalInfo } from '../../entities/employee-personal-info.entity';
 import { AgentSchedule } from '../../entities/agent-schedule.entity';
@@ -18,6 +19,8 @@ export class WorkstationConfigService {
     private workstationRepo: Repository<AgentWorkstationConfiguration>,
     @InjectRepository(ApplicationClassification)
     private classificationRepo: Repository<ApplicationClassification>,
+    @InjectRepository(ClientWebsite)
+    private clientWebsiteRepo: Repository<ClientWebsite>,
     @InjectRepository(EmployeePersonalInfo)
     private employeePersonalInfoRepo: Repository<EmployeePersonalInfo>,
     @InjectRepository(AgentSchedule)
@@ -43,6 +46,12 @@ export class WorkstationConfigService {
     const classifications = await this.classificationRepo.find({
       where: { isActive: true },
       order: { priority: 'DESC' },
+    });
+
+    // Get active client websites
+    const clientWebsites = await this.clientWebsiteRepo.find({
+      where: { isActive: true },
+      order: { clientName: 'ASC', domain: 'ASC' },
     });
 
     // Load break schedules if NT account is provided
@@ -142,6 +151,12 @@ export class WorkstationConfigService {
         priority: c.priority,
       })),
       break_schedules: breakSchedules,
+      client_websites: clientWebsites.map((cw) => ({
+        client_name: cw.clientName,
+        website_url: cw.websiteUrl,
+        domain: cw.domain,
+        url_pattern: cw.urlPattern,
+      })),
     };
   }
 

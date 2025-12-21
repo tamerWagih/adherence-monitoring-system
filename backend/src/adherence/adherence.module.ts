@@ -5,6 +5,7 @@ import { AgentAdherenceSummary } from '../entities/agent-adherence-summary.entit
 import { AgentAdherenceException } from '../entities/agent-adherence-exception.entity';
 import { AgentWorkstationConfiguration } from '../entities/agent-workstation-configuration.entity';
 import { ApplicationClassification } from '../entities/application-classification.entity';
+import { ClientWebsite } from '../entities/client-website.entity';
 import { EmployeePersonalInfo } from '../entities/employee-personal-info.entity';
 import { AgentSchedule } from '../entities/agent-schedule.entity';
 import { EventsController } from './controllers/events.controller';
@@ -36,6 +37,7 @@ import { AgentStatusService } from './services/agent-status.service';
       AgentAdherenceException,
       AgentWorkstationConfiguration,
       ApplicationClassification,
+      ClientWebsite, // For client website detection
       EmployeePersonalInfo, // For NT account resolution
       AgentSchedule, // For break schedule queries
     ]),

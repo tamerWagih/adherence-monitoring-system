@@ -25,6 +25,7 @@ public class ConfigSyncService : BackgroundService
     private readonly AgentConfig _config;
     private readonly CredentialStore _credentialStore;
     private readonly ClassificationCache _classificationCache;
+    private readonly ClientWebsiteCache _clientWebsiteCache;
     private readonly BreakScheduleCache _breakScheduleCache;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TimeSpan _syncInterval;
@@ -37,6 +38,7 @@ public class ConfigSyncService : BackgroundService
         AgentConfig config,
         CredentialStore credentialStore,
         ClassificationCache classificationCache,
+        ClientWebsiteCache clientWebsiteCache,
         BreakScheduleCache breakScheduleCache,
         IHttpClientFactory httpClientFactory)
     {
@@ -44,6 +46,7 @@ public class ConfigSyncService : BackgroundService
         _config = config;
         _credentialStore = credentialStore;
         _classificationCache = classificationCache;
+        _clientWebsiteCache = clientWebsiteCache;
         _breakScheduleCache = breakScheduleCache;
         _httpClientFactory = httpClientFactory;
         // Sync every 15 minutes by default, but can be configured via backend response
@@ -176,6 +179,19 @@ public class ConfigSyncService : BackgroundService
                     _logger.LogWarning("Configuration sync returned empty classifications");
                 }
 
+                // Cache client websites if available
+                if (configData?.ClientWebsites != null)
+                {
+                    _clientWebsiteCache.SaveClientWebsites(configData.ClientWebsites);
+                    _logger.LogInformation(
+                        "Loaded {Count} client websites.",
+                        configData.ClientWebsites.Count);
+                }
+                else
+                {
+                    _logger.LogDebug("No client websites in configuration response");
+                }
+
                 // Cache break schedules if available
                 if (configData?.BreakSchedules != null)
                 {
@@ -229,6 +245,9 @@ public class ConfigSyncService : BackgroundService
 
         [System.Text.Json.Serialization.JsonPropertyName("application_classifications")]
         public List<ApplicationClassification>? ApplicationClassifications { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("client_websites")]
+        public List<ClientWebsite>? ClientWebsites { get; set; }
 
         [System.Text.Json.Serialization.JsonPropertyName("break_schedules")]
         public List<BreakSchedule>? BreakSchedules { get; set; }

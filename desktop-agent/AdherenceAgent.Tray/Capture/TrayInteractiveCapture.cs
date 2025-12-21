@@ -24,6 +24,7 @@ public sealed class TrayInteractiveCapture : IDisposable
     private readonly ILogger _logger;
     private readonly IEventBuffer _buffer;
     private readonly ClassificationCache _classificationCache;
+    private readonly ClientWebsiteCache _clientWebsiteCache;
     private readonly CancellationTokenSource _cts = new();
     private readonly System.Threading.Timer _statsTimer;
     private long _windowOk, _windowFail, _browserOk, _browserFail, _teamsOk, _teamsFail;
@@ -33,11 +34,12 @@ public sealed class TrayInteractiveCapture : IDisposable
     private readonly BrowserTabMonitor _browserTabs;
     private readonly TeamsMonitor _teams;
 
-    public TrayInteractiveCapture(AgentConfig config, IEventBuffer buffer, ClassificationCache classificationCache, ILogger? logger = null)
+    public TrayInteractiveCapture(AgentConfig config, IEventBuffer buffer, ClassificationCache classificationCache, ClientWebsiteCache clientWebsiteCache, ILogger? logger = null)
     {
         _logger = logger ?? NullLogger.Instance;
         _buffer = buffer;
         _classificationCache = classificationCache;
+        _clientWebsiteCache = clientWebsiteCache;
 
         _activeWindow = new ActiveWindowMonitor(
             _buffer,
@@ -46,6 +48,7 @@ public sealed class TrayInteractiveCapture : IDisposable
             ex => LogFailureOnce("window", ex, ref _windowFail, ref _windowLogged));
         _browserTabs = new BrowserTabMonitor(
             _buffer,
+            _clientWebsiteCache,
             () => Interlocked.Increment(ref _browserOk),
             ex => LogFailureOnce("browser", ex, ref _browserFail, ref _browserLogged));
         _teams = new TeamsMonitor(
@@ -239,6 +242,7 @@ public sealed class TrayInteractiveCapture : IDisposable
     private sealed class BrowserTabMonitor
     {
         private readonly IEventBuffer _buffer;
+        private readonly ClientWebsiteCache _clientWebsiteCache;
         private readonly Action _ok;
         private readonly Action<Exception> _fail;
         private readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(2);
@@ -251,9 +255,10 @@ public sealed class TrayInteractiveCapture : IDisposable
 
         private static readonly string[] BrowserProcessNames = { "chrome", "msedge", "firefox", "brave", "opera" };
 
-        public BrowserTabMonitor(IEventBuffer buffer, Action ok, Action<Exception> fail)
+        public BrowserTabMonitor(IEventBuffer buffer, ClientWebsiteCache clientWebsiteCache, Action ok, Action<Exception> fail)
         {
             _buffer = buffer;
+            _clientWebsiteCache = clientWebsiteCache;
             _ok = ok;
             _fail = fail;
         }
@@ -285,11 +290,14 @@ public sealed class TrayInteractiveCapture : IDisposable
 
                 bool shouldEmit = false;
                 string? domain = null;
+                string? url = null;
                 lock (_lock)
                 {
                     if (title != _lastTitle)
                     {
-                        domain = ExtractDomainFromTitle(title);
+                        var extracted = ExtractUrlAndDomainFromTitle(title);
+                        url = extracted.url;
+                        domain = extracted.domain;
                         var now = DateTime.UtcNow;
                         var domainChanged = domain != _lastDomain;
                         var enoughTime = (now - _lastEventUtc) >= _minEventInterval;
@@ -318,11 +326,15 @@ public sealed class TrayInteractiveCapture : IDisposable
                     WindowTitle = title,
                     Metadata = new Dictionary<string, object>
                     {
+                        { "url", url ?? string.Empty },
                         { "domain", domain ?? string.Empty },
                         { "window_title", title ?? string.Empty }
                     }
                 }, token);
                 _ok();
+
+                // Check if this is a client website and create CLIENT_WEBSITE_ACCESS event
+                await CheckAndCreateClientWebsiteEventAsync(domain, url, title, token);
             }
             catch (Exception ex)
             {
@@ -340,18 +352,26 @@ public sealed class TrayInteractiveCapture : IDisposable
             return false;
         }
 
-        private static string? ExtractDomainFromTitle(string? title)
+        private static (string? url, string? domain) ExtractUrlAndDomainFromTitle(string? title)
         {
-            if (string.IsNullOrWhiteSpace(title)) return null;
+            if (string.IsNullOrWhiteSpace(title)) return (null, null);
+            
+            // Try to extract URL directly from title
             var urlMatch = Regex.Match(title, @"https?://([^\s\-|]+)", RegexOptions.IgnoreCase);
             if (urlMatch.Success)
             {
                 var url = urlMatch.Value;
-                if (Uri.TryCreate(url, UriKind.Absolute, out var uri)) return uri.Host;
+                if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                {
+                    return (url, uri.Host);
+                }
             }
+            
+            // Try to extract domain from common patterns
             var domainMatch = Regex.Match(title, @"([a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9]*\.(?:[a-zA-Z]{2,}))", RegexOptions.IgnoreCase);
-            if (domainMatch.Success) return domainMatch.Value;
-            return null;
+            if (domainMatch.Success) return (null, domainMatch.Value);
+            
+            return (null, null);
         }
 
         [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
@@ -375,6 +395,52 @@ public sealed class TrayInteractiveCapture : IDisposable
                 return (name, title);
             }
             catch { return (null, null); }
+        }
+
+        private async Task CheckAndCreateClientWebsiteEventAsync(string? domain, string? url, string? title, CancellationToken token)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(domain))
+                {
+                    return; // No domain to check
+                }
+
+                // Get client websites from cache
+                var clientWebsites = _clientWebsiteCache.GetClientWebsites();
+                if (clientWebsites == null || clientWebsites.Count == 0)
+                {
+                    return; // No client websites configured
+                }
+
+                // Find matching client website
+                var matchingWebsite = ClientWebsiteMatcher.FindMatchingClientWebsite(domain, url, clientWebsites);
+                if (matchingWebsite == null)
+                {
+                    return; // Not a client website
+                }
+
+                // Create CLIENT_WEBSITE_ACCESS event
+                await _buffer.AddAsync(new AdherenceEvent
+                {
+                    EventType = EventTypes.ClientWebsiteAccess,
+                    EventTimestampUtc = DateTime.UtcNow,
+                    NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
+                    WindowTitle = title,
+                    Metadata = new Dictionary<string, object>
+                    {
+                        { "client_name", matchingWebsite.ClientName },
+                        { "domain", domain ?? string.Empty },
+                        { "url", url ?? string.Empty },
+                        { "website_url", matchingWebsite.WebsiteUrl }
+                    }
+                }, token);
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail - client website detection is non-critical
+                _fail(ex);
+            }
         }
     }
 

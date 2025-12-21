@@ -65,6 +65,8 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IEventBuffer, SQLiteEventBuffer>();
         services.AddSingleton<ClassificationCache>(provider =>
             new ClassificationCache(provider.GetService<ILogger<ClassificationCache>>()));
+        services.AddSingleton<ClientWebsiteCache>(provider =>
+            new ClientWebsiteCache(provider.GetService<ILogger<ClientWebsiteCache>>()));
         services.AddSingleton<BreakScheduleCache>(provider =>
             new BreakScheduleCache(provider.GetService<ILogger<BreakScheduleCache>>()));
         services.AddSingleton<BreakDetector>();

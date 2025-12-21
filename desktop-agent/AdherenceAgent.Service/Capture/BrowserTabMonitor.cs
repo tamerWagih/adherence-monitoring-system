@@ -22,6 +22,7 @@ public class BrowserTabMonitor
 {
     private readonly ILogger<BrowserTabMonitor> _logger;
     private readonly IEventBuffer _buffer;
+    private readonly ClientWebsiteCache _clientWebsiteCache;
     private readonly TimeSpan _pollInterval;
     private Timer? _timer;
     private readonly object _lock = new object();
@@ -57,10 +58,12 @@ public class BrowserTabMonitor
     public BrowserTabMonitor(
         ILogger<BrowserTabMonitor> logger,
         IEventBuffer buffer,
+        ClientWebsiteCache clientWebsiteCache,
         AgentConfig config)
     {
         _logger = logger;
         _buffer = buffer;
+        _clientWebsiteCache = clientWebsiteCache;
         _pollInterval = TimeSpan.FromSeconds(10); // Poll every 10 seconds
     }
 
@@ -153,6 +156,9 @@ public class BrowserTabMonitor
             if (shouldCreateEvent)
             {
                 await CreateBrowserTabChangeEventAsync(procName, windowTitle, url, domain, token);
+                
+                // Check if this is a client website and create CLIENT_WEBSITE_ACCESS event
+                await CheckAndCreateClientWebsiteEventAsync(domain, url, windowTitle, token);
             }
         }
         catch (Exception ex)
