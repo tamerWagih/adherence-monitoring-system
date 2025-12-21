@@ -59,11 +59,28 @@ public static class CallingAppMatcher
 
             // Fallback: Check window title pattern if domain/URL matching failed
             // This handles cases like WhatsApp Web where title is "WhatsApp - Google Chrome"
-            if (!string.IsNullOrWhiteSpace(windowTitle) && !string.IsNullOrWhiteSpace(app.WindowTitlePattern))
+            if (!string.IsNullOrWhiteSpace(windowTitle))
             {
-                if (ApplicationClassifier.MatchesPattern(windowTitle, app.WindowTitlePattern))
+                // First try explicit window_title_pattern
+                if (!string.IsNullOrWhiteSpace(app.WindowTitlePattern))
                 {
-                    return app;
+                    if (ApplicationClassifier.MatchesPattern(windowTitle, app.WindowTitlePattern))
+                    {
+                        return app;
+                    }
+                }
+                
+                // Fallback: Use idle patterns from call_status_patterns to identify the app
+                // This works for apps like WhatsApp Web that have "*WhatsApp*" in idle patterns
+                if (app.CallStatusPatterns?.Idle != null && app.CallStatusPatterns.Idle.Count > 0)
+                {
+                    foreach (var idlePattern in app.CallStatusPatterns.Idle)
+                    {
+                        if (ApplicationClassifier.MatchesPattern(windowTitle, idlePattern))
+                        {
+                            return app;
+                        }
+                    }
                 }
             }
         }
