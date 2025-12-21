@@ -203,7 +203,7 @@ public static class CallingAppMatcher
     /// Check if a domain/URL matches a web-based calling app pattern.
     /// </summary>
     private static bool MatchesWebCallingApp(
-        string domain,
+        string? domain,
         string? url,
         CallingApp app)
     {
@@ -213,7 +213,7 @@ public static class CallingAppMatcher
         }
 
         // Check exact domain match
-        if (!string.IsNullOrWhiteSpace(app.Domain))
+        if (!string.IsNullOrWhiteSpace(app.Domain) && !string.IsNullOrWhiteSpace(domain))
         {
             var appDomain = NormalizeDomain(app.Domain);
             if (domain.Equals(appDomain, StringComparison.OrdinalIgnoreCase))
@@ -238,7 +238,7 @@ public static class CallingAppMatcher
         }
 
         // Check domain pattern if provided
-        if (!string.IsNullOrWhiteSpace(app.UrlPattern))
+        if (!string.IsNullOrWhiteSpace(app.UrlPattern) && !string.IsNullOrWhiteSpace(domain))
         {
             var domainPattern = ExtractDomainPattern(app.UrlPattern);
             if (!string.IsNullOrWhiteSpace(domainPattern))
