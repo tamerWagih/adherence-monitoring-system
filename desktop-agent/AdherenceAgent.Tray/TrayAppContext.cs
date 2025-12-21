@@ -30,6 +30,7 @@ public class TrayAppContext : ApplicationContext
     private readonly BreakScheduleCache _breakScheduleCache = new();
     private readonly ClassificationCache _classificationCache = new();
     private readonly ClientWebsiteCache _clientWebsiteCache = new();
+    private readonly CallingAppCache _callingAppCache = new();
     private const string ServiceName = "AdherenceAgentService";
     private long _lastProcessedBreakEventId = 0; // Track last processed break event to avoid duplicates
     private DateTime _trayAppStartTime = DateTime.UtcNow; // Track when tray app started to avoid showing old events
@@ -77,27 +78,13 @@ public class TrayAppContext : ApplicationContext
             }
             if (last != null) throw last;
 
-            _interactiveCapture = new TrayInteractiveCapture(_config, _trayBuffer, _classificationCache, _clientWebsiteCache);
+            _interactiveCapture = new TrayInteractiveCapture(_config, _trayBuffer, _classificationCache, _clientWebsiteCache, _callingAppCache);
             _interactiveCapture.Start();
-
-            try
-            {
-                PathProvider.EnsureDirectories();
-                var logPath = Path.Combine(PathProvider.LogsDirectory, "tray.log");
-                File.AppendAllText(logPath, $"{DateTime.UtcNow:o} Tray interactive capture started. DB={PathProvider.DatabaseFile}\n");
-            }
-            catch { }
         }
         catch (Exception ex)
         {
             // Keep tray stable even if capture fails; service/process monitoring still works.
-            try
-            {
-                PathProvider.EnsureDirectories();
-                var logPath = Path.Combine(PathProvider.LogsDirectory, "tray.log");
-                File.AppendAllText(logPath, $"{DateTime.UtcNow:o} Tray capture failed to start: {ex}\n");
-            }
-            catch { }
+            // Errors are logged by the service's agent.log file via Serilog.
         }
 
         _statusTimer = new System.Windows.Forms.Timer { Interval = 30_000 }; // 30s

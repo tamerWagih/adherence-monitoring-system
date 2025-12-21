@@ -67,6 +67,8 @@ var host = Host.CreateDefaultBuilder(args)
             new ClassificationCache(provider.GetService<ILogger<ClassificationCache>>()));
         services.AddSingleton<ClientWebsiteCache>(provider =>
             new ClientWebsiteCache(provider.GetService<ILogger<ClientWebsiteCache>>()));
+        services.AddSingleton<CallingAppCache>(provider =>
+            new CallingAppCache(provider.GetService<ILogger<CallingAppCache>>()));
         services.AddSingleton<BreakScheduleCache>(provider =>
             new BreakScheduleCache(provider.GetService<ILogger<BreakScheduleCache>>()));
         services.AddSingleton<BreakDetector>();

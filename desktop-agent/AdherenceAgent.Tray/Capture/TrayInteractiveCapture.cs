@@ -25,38 +25,37 @@ public sealed class TrayInteractiveCapture : IDisposable
     private readonly IEventBuffer _buffer;
     private readonly ClassificationCache _classificationCache;
     private readonly ClientWebsiteCache _clientWebsiteCache;
+    private readonly CallingAppCache _callingAppCache;
     private readonly CancellationTokenSource _cts = new();
-    private readonly System.Threading.Timer _statsTimer;
-    private long _windowOk, _windowFail, _browserOk, _browserFail, _teamsOk, _teamsFail;
-    private int _windowLogged, _browserLogged, _teamsLogged;
 
     private readonly ActiveWindowMonitor _activeWindow;
     private readonly BrowserTabMonitor _browserTabs;
     private readonly TeamsMonitor _teams;
 
-    public TrayInteractiveCapture(AgentConfig config, IEventBuffer buffer, ClassificationCache classificationCache, ClientWebsiteCache clientWebsiteCache, ILogger? logger = null)
+    public TrayInteractiveCapture(AgentConfig config, IEventBuffer buffer, ClassificationCache classificationCache, ClientWebsiteCache clientWebsiteCache, CallingAppCache callingAppCache, ILogger? logger = null)
     {
         _logger = logger ?? NullLogger.Instance;
         _buffer = buffer;
         _classificationCache = classificationCache;
         _clientWebsiteCache = clientWebsiteCache;
+        _callingAppCache = callingAppCache;
 
         _activeWindow = new ActiveWindowMonitor(
             _buffer,
             _classificationCache,
-            () => Interlocked.Increment(ref _windowOk),
-            ex => LogFailureOnce("window", ex, ref _windowFail, ref _windowLogged));
+            _callingAppCache,
+            () => { }, // Success callback (no-op)
+            ex => { }); // Failure callback (silent - errors handled by monitors)
         _browserTabs = new BrowserTabMonitor(
             _buffer,
             _clientWebsiteCache,
-            () => Interlocked.Increment(ref _browserOk),
-            ex => LogFailureOnce("browser", ex, ref _browserFail, ref _browserLogged));
+            _callingAppCache,
+            () => { }, // Success callback (no-op)
+            ex => { }); // Failure callback (silent - errors handled by monitors)
         _teams = new TeamsMonitor(
             _buffer,
-            () => Interlocked.Increment(ref _teamsOk),
-            ex => LogFailureOnce("teams", ex, ref _teamsFail, ref _teamsLogged));
-
-        _statsTimer = new System.Threading.Timer(_ => WriteStats(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+            () => { }, // Success callback (no-op)
+            ex => { }); // Failure callback (silent - errors handled by monitors)
     }
 
     public void Start()
@@ -79,36 +78,7 @@ public sealed class TrayInteractiveCapture : IDisposable
     public void Dispose()
     {
         Stop();
-        _statsTimer.Dispose();
         _cts.Dispose();
-    }
-
-    private void WriteStats()
-    {
-        try
-        {
-            var logPath = Path.Combine(PathProvider.LogsDirectory, "tray.log");
-            var line =
-                $"{DateTime.UtcNow:o} capture-stats window(ok={_windowOk},fail={_windowFail}) " +
-                $"browser(ok={_browserOk},fail={_browserFail}) teams(ok={_teamsOk},fail={_teamsFail})\n";
-            File.AppendAllText(logPath, line);
-        }
-        catch { }
-    }
-
-    private void LogFailureOnce(string kind, Exception ex, ref long failCounter, ref int loggedCounter)
-    {
-        Interlocked.Increment(ref failCounter);
-        // Log only first few failures per kind to avoid spamming.
-        if (Interlocked.Increment(ref loggedCounter) <= 5)
-        {
-            try
-            {
-                var logPath = Path.Combine(PathProvider.LogsDirectory, "tray.log");
-                File.AppendAllText(logPath, $"{DateTime.UtcNow:o} {kind}-capture-fail: {ex.GetType().Name}: {ex.Message}\n");
-            }
-            catch { }
-        }
     }
 
     // ---- Minimal monitor implementations (tray-side) ----
@@ -117,6 +87,7 @@ public sealed class TrayInteractiveCapture : IDisposable
     {
         private readonly IEventBuffer _buffer;
         private readonly ClassificationCache _classificationCache;
+        private readonly CallingAppCache _callingAppCache;
         private readonly Action _ok;
         private readonly Action<Exception> _fail;
         private readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(5);
@@ -130,10 +101,11 @@ public sealed class TrayInteractiveCapture : IDisposable
         // Teams process names (covered by TeamsMonitor)
         private static readonly string[] TeamsProcessNames = { "Teams", "ms-teams" };
 
-        public ActiveWindowMonitor(IEventBuffer buffer, ClassificationCache classificationCache, Action ok, Action<Exception> fail)
+        public ActiveWindowMonitor(IEventBuffer buffer, ClassificationCache classificationCache, CallingAppCache callingAppCache, Action ok, Action<Exception> fail)
         {
             _buffer = buffer;
             _classificationCache = classificationCache;
+            _callingAppCache = callingAppCache;
             _ok = ok;
             _fail = fail;
         }
@@ -193,10 +165,60 @@ public sealed class TrayInteractiveCapture : IDisposable
                     }
                 }, token);
                 _ok();
+
+                // Check if this is a desktop calling app and create calling app events
+                await CheckAndCreateDesktopCallingAppEventAsync(procName, title, token);
             }
             catch (Exception ex)
             {
                 // keep tray stable; errors are non-fatal
+                _fail(ex);
+            }
+        }
+
+        private async Task CheckAndCreateDesktopCallingAppEventAsync(string? processName, string? windowTitle, CancellationToken token)
+        {
+            try
+            {
+                // Get calling apps from cache
+                var callingApps = _callingAppCache.GetCallingApps();
+                if (callingApps == null || callingApps.Count == 0)
+                {
+                    return; // No calling apps configured
+                }
+
+                // Check for desktop calling apps
+                var matchingApp = CallingAppMatcher.FindMatchingDesktopCallingApp(processName, windowTitle, callingApps);
+                if (matchingApp != null)
+                {
+                    // Detect call status from window title
+                    var callStatus = CallingAppMatcher.DetectCallStatus(windowTitle, matchingApp);
+
+                    // Create CALLING_APP_IN_CALL event if call status detected
+                    if (!string.IsNullOrWhiteSpace(callStatus))
+                    {
+                        await _buffer.AddAsync(new AdherenceEvent
+                        {
+                            EventType = EventTypes.CallingAppInCall,
+                            EventTimestampUtc = DateTime.UtcNow,
+                            NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
+                            ApplicationName = processName,
+                            WindowTitle = windowTitle,
+                            Metadata = new Dictionary<string, object>
+                            {
+                                { "app_name", matchingApp.AppName },
+                                { "app_type", matchingApp.AppType },
+                                { "client_name", matchingApp.ClientName ?? string.Empty },
+                                { "call_status", callStatus },
+                                { "process_name", processName ?? string.Empty }
+                            }
+                        }, token);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail - calling app detection is non-critical
                 _fail(ex);
             }
         }
@@ -243,6 +265,7 @@ public sealed class TrayInteractiveCapture : IDisposable
     {
         private readonly IEventBuffer _buffer;
         private readonly ClientWebsiteCache _clientWebsiteCache;
+        private readonly CallingAppCache _callingAppCache;
         private readonly Action _ok;
         private readonly Action<Exception> _fail;
         private readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(2);
@@ -255,10 +278,11 @@ public sealed class TrayInteractiveCapture : IDisposable
 
         private static readonly string[] BrowserProcessNames = { "chrome", "msedge", "firefox", "brave", "opera" };
 
-        public BrowserTabMonitor(IEventBuffer buffer, ClientWebsiteCache clientWebsiteCache, Action ok, Action<Exception> fail)
+        public BrowserTabMonitor(IEventBuffer buffer, ClientWebsiteCache clientWebsiteCache, CallingAppCache callingAppCache, Action ok, Action<Exception> fail)
         {
             _buffer = buffer;
             _clientWebsiteCache = clientWebsiteCache;
+            _callingAppCache = callingAppCache;
             _ok = ok;
             _fail = fail;
         }
@@ -335,6 +359,9 @@ public sealed class TrayInteractiveCapture : IDisposable
 
                 // Check if this is a client website and create CLIENT_WEBSITE_ACCESS event
                 await CheckAndCreateClientWebsiteEventAsync(domain, url, title, token);
+
+                // Check if this is a calling app and create calling app events
+                await CheckAndCreateCallingAppEventAsync(domain, url, title, procName, token);
             }
             catch (Exception ex)
             {
@@ -368,8 +395,26 @@ public sealed class TrayInteractiveCapture : IDisposable
             }
             
             // Try to extract domain from common patterns
-            var domainMatch = Regex.Match(title, @"([a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9]*\.(?:[a-zA-Z]{2,}))", RegexOptions.IgnoreCase);
-            if (domainMatch.Success) return (null, domainMatch.Value);
+            // Improved regex: matches full domain including subdomain and TLD
+            // Pattern: (subdomain.)domain.tld where tld is 2+ letters
+            // Examples: app.oyorooms.com, mycompany.salesforce.com
+            var domainPattern = @"([a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])*(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])*)*\.[a-zA-Z]{2,})";
+            var domainMatches = Regex.Matches(title, domainPattern, RegexOptions.IgnoreCase);
+            
+            // Return the longest match (most complete domain)
+            if (domainMatches.Count > 0)
+            {
+                string? longestDomain = null;
+                foreach (Match match in domainMatches)
+                {
+                    var domain = match.Value;
+                    if (longestDomain == null || domain.Length > longestDomain.Length)
+                    {
+                        longestDomain = domain;
+                    }
+                }
+                return (null, longestDomain);
+            }
             
             return (null, null);
         }
@@ -439,6 +484,57 @@ public sealed class TrayInteractiveCapture : IDisposable
             catch (Exception ex)
             {
                 // Log but don't fail - client website detection is non-critical
+                _fail(ex);
+            }
+        }
+
+        private async Task CheckAndCreateCallingAppEventAsync(string? domain, string? url, string? title, string? processName, CancellationToken token)
+        {
+            try
+            {
+                // Get calling apps from cache
+                var callingApps = _callingAppCache.GetCallingApps();
+                if (callingApps == null || callingApps.Count == 0)
+                {
+                    return; // No calling apps configured
+                }
+
+                // Check for web-based calling apps
+                if (!string.IsNullOrWhiteSpace(domain) || !string.IsNullOrWhiteSpace(url))
+                {
+                    var matchingApp = CallingAppMatcher.FindMatchingWebCallingApp(domain, url, callingApps);
+                    if (matchingApp != null)
+                    {
+                        // Detect call status from window title
+                        var callStatus = CallingAppMatcher.DetectCallStatus(title, matchingApp);
+
+                        // Create CALLING_APP_IN_CALL event if call status detected
+                        if (!string.IsNullOrWhiteSpace(callStatus))
+                        {
+                            await _buffer.AddAsync(new AdherenceEvent
+                            {
+                                EventType = EventTypes.CallingAppInCall,
+                                EventTimestampUtc = DateTime.UtcNow,
+                                NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
+                                ApplicationName = processName,
+                                WindowTitle = title,
+                                Metadata = new Dictionary<string, object>
+                                {
+                                    { "app_name", matchingApp.AppName },
+                                    { "app_type", matchingApp.AppType },
+                                    { "client_name", matchingApp.ClientName ?? string.Empty },
+                                    { "call_status", callStatus },
+                                    { "domain", domain ?? string.Empty },
+                                    { "url", url ?? string.Empty }
+                                }
+                            }, token);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail - calling app detection is non-critical
                 _fail(ex);
             }
         }

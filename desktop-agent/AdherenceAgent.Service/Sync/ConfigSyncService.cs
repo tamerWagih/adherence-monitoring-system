@@ -26,6 +26,7 @@ public class ConfigSyncService : BackgroundService
     private readonly CredentialStore _credentialStore;
     private readonly ClassificationCache _classificationCache;
     private readonly ClientWebsiteCache _clientWebsiteCache;
+    private readonly CallingAppCache _callingAppCache;
     private readonly BreakScheduleCache _breakScheduleCache;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TimeSpan _syncInterval;
@@ -39,6 +40,7 @@ public class ConfigSyncService : BackgroundService
         CredentialStore credentialStore,
         ClassificationCache classificationCache,
         ClientWebsiteCache clientWebsiteCache,
+        CallingAppCache callingAppCache,
         BreakScheduleCache breakScheduleCache,
         IHttpClientFactory httpClientFactory)
     {
@@ -47,6 +49,7 @@ public class ConfigSyncService : BackgroundService
         _credentialStore = credentialStore;
         _classificationCache = classificationCache;
         _clientWebsiteCache = clientWebsiteCache;
+        _callingAppCache = callingAppCache;
         _breakScheduleCache = breakScheduleCache;
         _httpClientFactory = httpClientFactory;
         // Sync every 15 minutes by default, but can be configured via backend response
@@ -192,6 +195,19 @@ public class ConfigSyncService : BackgroundService
                     _logger.LogDebug("No client websites in configuration response");
                 }
 
+                // Cache calling apps if available
+                if (configData?.CallingApps != null)
+                {
+                    _callingAppCache.SaveCallingApps(configData.CallingApps);
+                    _logger.LogInformation(
+                        "Loaded {Count} calling apps.",
+                        configData.CallingApps.Count);
+                }
+                else
+                {
+                    _logger.LogDebug("No calling apps in configuration response");
+                }
+
                 // Cache break schedules if available
                 if (configData?.BreakSchedules != null)
                 {
@@ -248,6 +264,9 @@ public class ConfigSyncService : BackgroundService
 
         [System.Text.Json.Serialization.JsonPropertyName("client_websites")]
         public List<ClientWebsite>? ClientWebsites { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("calling_apps")]
+        public List<CallingApp>? CallingApps { get; set; }
 
         [System.Text.Json.Serialization.JsonPropertyName("break_schedules")]
         public List<BreakSchedule>? BreakSchedules { get; set; }

@@ -8,43 +8,43 @@ using Microsoft.Extensions.Logging;
 namespace AdherenceAgent.Shared.Configuration;
 
 /// <summary>
-/// Manages caching of client websites locally.
+/// Manages caching of calling apps locally.
 /// Loads from and saves to JSON file in ProgramData.
-/// Similar to ClassificationCache.
+/// Similar to ClientWebsiteCache and ClassificationCache.
 /// </summary>
-public class ClientWebsiteCache
+public class CallingAppCache
 {
     private readonly string _cacheFilePath;
-    private readonly ILogger<ClientWebsiteCache>? _logger;
-    private List<ClientWebsite>? _cachedWebsites;
+    private readonly ILogger<CallingAppCache>? _logger;
+    private List<CallingApp>? _cachedApps;
     private DateTime? _lastLoadedFileWriteUtc;
 
-    public ClientWebsiteCache(ILogger<ClientWebsiteCache>? logger = null)
+    public CallingAppCache(ILogger<CallingAppCache>? logger = null)
     {
         PathProvider.EnsureDirectories();
-        _cacheFilePath = Path.Combine(PathProvider.BaseDirectory, "client_websites.json");
+        _cacheFilePath = Path.Combine(PathProvider.BaseDirectory, "calling_apps.json");
         _logger = logger;
     }
 
     /// <summary>
-    /// Get cached client websites.
+    /// Get cached calling apps.
     /// Returns empty list if cache file doesn't exist or is invalid.
     /// </summary>
-    public List<ClientWebsite> GetClientWebsites()
+    public List<CallingApp> GetCallingApps()
     {
         // If cache exists, invalidate it when the file on disk changes.
-        // This allows the service/tray to reflect new websites without a restart.
+        // This allows the service/tray to reflect new apps without a restart.
         try
         {
-            if (_cachedWebsites != null && File.Exists(_cacheFilePath))
+            if (_cachedApps != null && File.Exists(_cacheFilePath))
             {
                 var writeUtc = File.GetLastWriteTimeUtc(_cacheFilePath);
                 // IMPORTANT: If the cache was loaded before the file existed, _lastLoadedFileWriteUtc can be null.
                 // In that case, the first time the file appears we MUST reload.
                 if (!_lastLoadedFileWriteUtc.HasValue || writeUtc > _lastLoadedFileWriteUtc.Value)
                 {
-                    _logger?.LogDebug("Client websites cache file changed on disk; reloading.");
-                    _cachedWebsites = null;
+                    _logger?.LogDebug("Calling apps cache file changed on disk; reloading.");
+                    _cachedApps = null;
                 }
             }
         }
@@ -53,9 +53,9 @@ public class ClientWebsiteCache
             // ignore file stat errors; fall through to cached value if present
         }
 
-        if (_cachedWebsites != null)
+        if (_cachedApps != null)
         {
-            return _cachedWebsites;
+            return _cachedApps;
         }
 
         try
@@ -68,67 +68,67 @@ public class ClientWebsiteCache
                     PropertyNameCaseInsensitive = true,
                 };
 
-                var data = JsonSerializer.Deserialize<ClientWebsiteCacheData>(json, options);
-                if (data?.ClientWebsites != null)
+                var data = JsonSerializer.Deserialize<CallingAppCacheData>(json, options);
+                if (data?.CallingApps != null)
                 {
-                    _cachedWebsites = data.ClientWebsites;
+                    _cachedApps = data.CallingApps;
                     try { _lastLoadedFileWriteUtc = File.GetLastWriteTimeUtc(_cacheFilePath); } catch { /* ignore */ }
-                    _logger?.LogDebug("Loaded {Count} client websites from cache", _cachedWebsites.Count);
-                    return _cachedWebsites;
+                    _logger?.LogDebug("Loaded {Count} calling apps from cache", _cachedApps.Count);
+                    return _cachedApps;
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to load client websites from cache file");
+            _logger?.LogWarning(ex, "Failed to load calling apps from cache file");
         }
 
         // Return empty list if cache doesn't exist or failed to load
-        _cachedWebsites = new List<ClientWebsite>();
+        _cachedApps = new List<CallingApp>();
         try { _lastLoadedFileWriteUtc = File.Exists(_cacheFilePath) ? File.GetLastWriteTimeUtc(_cacheFilePath) : null; } catch { /* ignore */ }
-        return _cachedWebsites;
+        return _cachedApps;
     }
 
     /// <summary>
-    /// Save client websites to cache file.
+    /// Save calling apps to cache file.
     /// </summary>
-    public void SaveClientWebsites(List<ClientWebsite> websites)
+    public void SaveCallingApps(List<CallingApp> apps)
     {
         try
         {
-            var data = new ClientWebsiteCacheData
+            var data = new CallingAppCacheData
             {
-                ClientWebsites = websites,
+                CallingApps = apps,
                 LastUpdated = DateTime.UtcNow,
             };
 
             var options = new JsonSerializerOptions
             {
                 WriteIndented = true,
-                // JsonPropertyName attributes on ClientWebsite will override naming policy
+                // JsonPropertyName attributes on CallingApp will override naming policy
                 // This ensures snake_case is used (matching backend API)
             };
 
             var json = JsonSerializer.Serialize(data, options);
             File.WriteAllText(_cacheFilePath, json);
 
-            _cachedWebsites = websites;
+            _cachedApps = apps;
             try { _lastLoadedFileWriteUtc = File.GetLastWriteTimeUtc(_cacheFilePath); } catch { /* ignore */ }
-            _logger?.LogInformation("Saved {Count} client websites to cache", websites.Count);
+            _logger?.LogInformation("Saved {Count} calling apps to cache", apps.Count);
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to save client websites to cache file");
+            _logger?.LogError(ex, "Failed to save calling apps to cache file");
             throw;
         }
     }
 
     /// <summary>
-    /// Clear cached client websites (force reload from file on next access).
+    /// Clear cached calling apps (force reload from file on next access).
     /// </summary>
     public void ClearCache()
     {
-        _cachedWebsites = null;
+        _cachedApps = null;
         _lastLoadedFileWriteUtc = null;
     }
 
@@ -140,10 +140,10 @@ public class ClientWebsiteCache
     /// <summary>
     /// Internal data structure for cache file.
     /// </summary>
-    private class ClientWebsiteCacheData
+    private class CallingAppCacheData
     {
-        [JsonPropertyName("client_websites")]
-        public List<ClientWebsite> ClientWebsites { get; set; } = new();
+        [JsonPropertyName("calling_apps")]
+        public List<CallingApp> CallingApps { get; set; } = new();
 
         [JsonPropertyName("last_updated")]
         public DateTime LastUpdated { get; set; }

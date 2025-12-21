@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Raw } from 'typeorm';
 import { ApplicationClassification } from '../../entities/application-classification.entity';
 import { ClientWebsite } from '../../entities/client-website.entity';
+import { CallingApp } from '../../entities/calling-app.entity';
 import { AgentWorkstationConfiguration } from '../../entities/agent-workstation-configuration.entity';
 import { EmployeePersonalInfo } from '../../entities/employee-personal-info.entity';
 import { AgentSchedule } from '../../entities/agent-schedule.entity';
@@ -21,6 +22,8 @@ export class WorkstationConfigService {
     private classificationRepo: Repository<ApplicationClassification>,
     @InjectRepository(ClientWebsite)
     private clientWebsiteRepo: Repository<ClientWebsite>,
+    @InjectRepository(CallingApp)
+    private callingAppRepo: Repository<CallingApp>,
     @InjectRepository(EmployeePersonalInfo)
     private employeePersonalInfoRepo: Repository<EmployeePersonalInfo>,
     @InjectRepository(AgentSchedule)
@@ -52,6 +55,12 @@ export class WorkstationConfigService {
     const clientWebsites = await this.clientWebsiteRepo.find({
       where: { isActive: true },
       order: { clientName: 'ASC', domain: 'ASC' },
+    });
+
+    // Get active calling apps
+    const callingApps = await this.callingAppRepo.find({
+      where: { isActive: true },
+      order: { appName: 'ASC', appType: 'ASC' },
     });
 
     // Load break schedules if NT account is provided
@@ -156,6 +165,17 @@ export class WorkstationConfigService {
         website_url: cw.websiteUrl,
         domain: cw.domain,
         url_pattern: cw.urlPattern,
+      })),
+      calling_apps: callingApps.map((ca) => ({
+        app_name: ca.appName,
+        app_type: ca.appType,
+        client_name: ca.clientName,
+        website_url: ca.websiteUrl,
+        domain: ca.domain,
+        url_pattern: ca.urlPattern,
+        process_name_pattern: ca.processNamePattern,
+        window_title_pattern: ca.windowTitlePattern,
+        call_status_patterns: ca.callStatusPatterns,
       })),
     };
   }
