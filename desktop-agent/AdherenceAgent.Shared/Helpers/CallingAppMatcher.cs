@@ -12,12 +12,13 @@ namespace AdherenceAgent.Shared.Helpers;
 public static class CallingAppMatcher
 {
     /// <summary>
-    /// Find matching calling app for a web-based app (by domain/URL).
+    /// Find matching calling app for a web-based app (by domain/URL/window title).
     /// Returns the first matching CallingApp, or null if no match.
     /// </summary>
     public static CallingApp? FindMatchingWebCallingApp(
         string? domain,
         string? url,
+        string? windowTitle,
         List<CallingApp> callingApps)
     {
         if (callingApps == null || callingApps.Count == 0)
@@ -32,31 +33,38 @@ public static class CallingAppMatcher
             return null;
         }
 
-        if (string.IsNullOrWhiteSpace(domain) && string.IsNullOrWhiteSpace(url))
-        {
-            return null;
-        }
-
         // Try to extract domain from URL if domain is not provided
         if (string.IsNullOrWhiteSpace(domain) && !string.IsNullOrWhiteSpace(url))
         {
             domain = ExtractDomainFromUrl(url);
         }
 
-        if (string.IsNullOrWhiteSpace(domain))
+        // Normalize domain if we have it
+        if (!string.IsNullOrWhiteSpace(domain))
         {
-            return null;
+            domain = NormalizeDomain(domain);
         }
-
-        // Normalize domain
-        domain = NormalizeDomain(domain);
 
         // Check each web-based calling app
         foreach (var app in webApps)
         {
-            if (MatchesWebCallingApp(domain, url, app))
+            // First try domain/URL matching
+            if (!string.IsNullOrWhiteSpace(domain) || !string.IsNullOrWhiteSpace(url))
             {
-                return app;
+                if (MatchesWebCallingApp(domain, url, app))
+                {
+                    return app;
+                }
+            }
+
+            // Fallback: Check window title pattern if domain/URL matching failed
+            // This handles cases like WhatsApp Web where title is "WhatsApp - Google Chrome"
+            if (!string.IsNullOrWhiteSpace(windowTitle) && !string.IsNullOrWhiteSpace(app.WindowTitlePattern))
+            {
+                if (ApplicationClassifier.MatchesPattern(windowTitle, app.WindowTitlePattern))
+                {
+                    return app;
+                }
             }
         }
 

@@ -81,7 +81,7 @@ public class TrayAppContext : ApplicationContext
             _interactiveCapture = new TrayInteractiveCapture(_config, _trayBuffer, _classificationCache, _clientWebsiteCache, _callingAppCache);
             _interactiveCapture.Start();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Keep tray stable even if capture fails; service/process monitoring still works.
             // Errors are logged by the service's agent.log file via Serilog.

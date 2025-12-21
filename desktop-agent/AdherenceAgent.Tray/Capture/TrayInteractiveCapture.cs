@@ -51,7 +51,8 @@ public sealed class TrayInteractiveCapture : IDisposable
             _clientWebsiteCache,
             _callingAppCache,
             () => { }, // Success callback (no-op)
-            ex => { }); // Failure callback (silent - errors handled by monitors)
+            ex => { }, // Failure callback (silent - errors handled by monitors)
+            _logger);
         _teams = new TeamsMonitor(
             _buffer,
             () => { }, // Success callback (no-op)
@@ -193,27 +194,31 @@ public sealed class TrayInteractiveCapture : IDisposable
                 {
                     // Detect call status from window title
                     var callStatus = CallingAppMatcher.DetectCallStatus(windowTitle, matchingApp);
-
-                    // Create CALLING_APP_IN_CALL event if call status detected
-                    if (!string.IsNullOrWhiteSpace(callStatus))
+                    
+                    // Use "idle" as default if call status cannot be determined
+                    // This ensures we track calling app usage even when status is unknown
+                    if (string.IsNullOrWhiteSpace(callStatus))
                     {
-                        await _buffer.AddAsync(new AdherenceEvent
-                        {
-                            EventType = EventTypes.CallingAppInCall,
-                            EventTimestampUtc = DateTime.UtcNow,
-                            NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
-                            ApplicationName = processName,
-                            WindowTitle = windowTitle,
-                            Metadata = new Dictionary<string, object>
-                            {
-                                { "app_name", matchingApp.AppName },
-                                { "app_type", matchingApp.AppType },
-                                { "client_name", matchingApp.ClientName ?? string.Empty },
-                                { "call_status", callStatus },
-                                { "process_name", processName ?? string.Empty }
-                            }
-                        }, token);
+                        callStatus = "idle";
                     }
+
+                    // Create CALLING_APP_IN_CALL event when calling app is detected
+                    await _buffer.AddAsync(new AdherenceEvent
+                    {
+                        EventType = EventTypes.CallingAppInCall,
+                        EventTimestampUtc = DateTime.UtcNow,
+                        NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
+                        ApplicationName = processName,
+                        WindowTitle = windowTitle,
+                        Metadata = new Dictionary<string, object>
+                        {
+                            { "app_name", matchingApp.AppName },
+                            { "app_type", matchingApp.AppType },
+                            { "client_name", matchingApp.ClientName ?? string.Empty },
+                            { "call_status", callStatus },
+                            { "process_name", processName ?? string.Empty }
+                        }
+                    }, token);
                 }
             }
             catch (Exception ex)
@@ -268,6 +273,7 @@ public sealed class TrayInteractiveCapture : IDisposable
         private readonly CallingAppCache _callingAppCache;
         private readonly Action _ok;
         private readonly Action<Exception> _fail;
+        private readonly ILogger? _logger;
         private readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(2);
         private readonly object _lock = new();
         private System.Threading.Timer? _timer;
@@ -278,13 +284,14 @@ public sealed class TrayInteractiveCapture : IDisposable
 
         private static readonly string[] BrowserProcessNames = { "chrome", "msedge", "firefox", "brave", "opera" };
 
-        public BrowserTabMonitor(IEventBuffer buffer, ClientWebsiteCache clientWebsiteCache, CallingAppCache callingAppCache, Action ok, Action<Exception> fail)
+        public BrowserTabMonitor(IEventBuffer buffer, ClientWebsiteCache clientWebsiteCache, CallingAppCache callingAppCache, Action ok, Action<Exception> fail, ILogger? logger = null)
         {
             _buffer = buffer;
             _clientWebsiteCache = clientWebsiteCache;
             _callingAppCache = callingAppCache;
             _ok = ok;
             _fail = fail;
+            _logger = logger;
         }
 
         public void Start(CancellationToken token)
@@ -496,45 +503,65 @@ public sealed class TrayInteractiveCapture : IDisposable
                 var callingApps = _callingAppCache.GetCallingApps();
                 if (callingApps == null || callingApps.Count == 0)
                 {
+                    _logger?.LogDebug("No calling apps configured in cache");
                     return; // No calling apps configured
                 }
 
-                // Check for web-based calling apps
-                if (!string.IsNullOrWhiteSpace(domain) || !string.IsNullOrWhiteSpace(url))
-                {
-                    var matchingApp = CallingAppMatcher.FindMatchingWebCallingApp(domain, url, callingApps);
-                    if (matchingApp != null)
-                    {
-                        // Detect call status from window title
-                        var callStatus = CallingAppMatcher.DetectCallStatus(title, matchingApp);
+                _logger?.LogDebug("Checking calling app match for domain: {Domain}, url: {Url}, title: {Title}", domain, url, title);
 
-                        // Create CALLING_APP_IN_CALL event if call status detected
-                        if (!string.IsNullOrWhiteSpace(callStatus))
-                        {
-                            await _buffer.AddAsync(new AdherenceEvent
-                            {
-                                EventType = EventTypes.CallingAppInCall,
-                                EventTimestampUtc = DateTime.UtcNow,
-                                NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
-                                ApplicationName = processName,
-                                WindowTitle = title,
-                                Metadata = new Dictionary<string, object>
-                                {
-                                    { "app_name", matchingApp.AppName },
-                                    { "app_type", matchingApp.AppType },
-                                    { "client_name", matchingApp.ClientName ?? string.Empty },
-                                    { "call_status", callStatus },
-                                    { "domain", domain ?? string.Empty },
-                                    { "url", url ?? string.Empty }
-                                }
-                            }, token);
-                        }
+                // Check for web-based calling apps
+                // Note: We check even if domain/url are empty, as window title pattern matching can still work
+                var matchingApp = CallingAppMatcher.FindMatchingWebCallingApp(domain, url, title, callingApps);
+                if (matchingApp != null)
+                {
+                    _logger?.LogDebug("Found matching calling app: {AppName} (Type: {AppType}, Client: {ClientName})", 
+                        matchingApp.AppName, matchingApp.AppType, matchingApp.ClientName ?? "None");
+
+                    // Detect call status from window title
+                    var callStatus = CallingAppMatcher.DetectCallStatus(title, matchingApp);
+                    
+                    // Use "idle" as default if call status cannot be determined
+                    // This ensures we track calling app usage even when status is unknown
+                    if (string.IsNullOrWhiteSpace(callStatus))
+                    {
+                        callStatus = "idle";
+                        _logger?.LogDebug("Call status not detected, defaulting to 'idle'");
                     }
+                    else
+                    {
+                        _logger?.LogDebug("Detected call status: {CallStatus}", callStatus);
+                    }
+
+                    // Create CALLING_APP_IN_CALL event when calling app is detected
+                    await _buffer.AddAsync(new AdherenceEvent
+                    {
+                        EventType = EventTypes.CallingAppInCall,
+                        EventTimestampUtc = DateTime.UtcNow,
+                        NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
+                        ApplicationName = processName,
+                        WindowTitle = title,
+                        Metadata = new Dictionary<string, object>
+                        {
+                            { "app_name", matchingApp.AppName },
+                            { "app_type", matchingApp.AppType },
+                            { "client_name", matchingApp.ClientName ?? string.Empty },
+                            { "call_status", callStatus },
+                            { "domain", domain ?? string.Empty },
+                            { "url", url ?? string.Empty }
+                        }
+                    }, token);
+                    
+                    _logger?.LogDebug("Created CALLING_APP_IN_CALL event for {AppName}", matchingApp.AppName);
+                }
+                else
+                {
+                    _logger?.LogDebug("No matching calling app found for domain: {Domain}, title: {Title}", domain, title);
                 }
             }
             catch (Exception ex)
             {
                 // Log but don't fail - calling app detection is non-critical
+                _logger?.LogError(ex, "Error checking calling app for domain: {Domain}", domain);
                 _fail(ex);
             }
         }

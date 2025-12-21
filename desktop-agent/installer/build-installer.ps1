@@ -91,8 +91,16 @@ dotnet publish "$root\AdherenceAgent.Tray\AdherenceAgent.Tray.csproj" -c Release
     -o $trayBinPath
 
 Write-Info "Copying configs..."
-Copy-Item "$root\AdherenceAgent.Service\appsettings.json" "$serviceBinPath\appsettings.json"
-Copy-Item "$root\AdherenceAgent.Service\appsettings.json" "$trayBinPath\appsettings.json"
+if (Test-Path "$root\AdherenceAgent.Service\appsettings.json") {
+    if (Test-Path $serviceBinPath) {
+        Copy-Item "$root\AdherenceAgent.Service\appsettings.json" "$serviceBinPath\appsettings.json" -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $trayBinPath) {
+        Copy-Item "$root\AdherenceAgent.Service\appsettings.json" "$trayBinPath\appsettings.json" -ErrorAction SilentlyContinue
+    }
+} else {
+    Write-Warn "appsettings.json not found, skipping config copy"
+}
 
 Write-Info "Compiling WiX installer..."
 # Set WiX variables for paths
