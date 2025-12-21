@@ -3,7 +3,7 @@
      xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
 
   <?define ProductName = "Adherence Monitoring Agent" ?>
-  <?define ProductVersion = "1.0.13" ?>
+  <?define ProductVersion = "1.0.14" ?>
   <?define ProductCode = "*" ?>
   <?define UpgradeCode = "A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D" ?>
   <?define Manufacturer = "Octopus WFM" ?>
@@ -25,7 +25,12 @@
              Keywords="Adherence,Monitoring,Agent"
              Manufacturer="$(var.Manufacturer)" />
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <!-- MajorUpgrade: Remove old version before installing new -->
+    <!-- Schedule: RemoveExistingProducts after InstallValidate to ensure old files are removed before new ones are installed -->
+    <MajorUpgrade 
+        DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+        Schedule="afterInstallValidate"
+        AllowSameVersionUpgrades="yes" />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Installation directory structure -->
@@ -71,7 +76,9 @@
                   Property="SetServiceAcl"
                   Value="&quot;[SystemFolder]sc.exe&quot; sdset $(var.ServiceName) &quot;D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;AU)&quot;" />
 
-    <!-- Configure service recovery: restart on failure -->
+    <!-- Configure service recovery: restart on failure or termination -->
+    <!-- Actions: restart after 60s, restart after 60s, restart after 60s (3 attempts) -->
+    <!-- Reset counter after 24 hours (86400 seconds) -->
     <CustomAction Id="SetServiceRecovery"
                   BinaryKey="WixCA"
                   DllEntry="WixQuietExec"
@@ -115,15 +122,18 @@
                   Return="ignore" />
 
     <InstallExecuteSequence>
-      <Custom Action="SetServiceAcl_SetProperty" After="InstallServices"><![CDATA[NOT Installed]]></Custom>
-      <Custom Action="SetServiceAcl" After="SetServiceAcl_SetProperty"><![CDATA[NOT Installed]]></Custom>
-      <Custom Action="SetServiceRecovery_SetProperty" After="InstallServices"><![CDATA[NOT Installed]]></Custom>
-      <Custom Action="SetServiceRecovery" After="SetServiceRecovery_SetProperty"><![CDATA[NOT Installed]]></Custom>
-      <Custom Action="SetServiceRecoveryFlag_SetProperty" After="InstallServices"><![CDATA[NOT Installed]]></Custom>
-      <Custom Action="SetServiceRecoveryFlag" After="SetServiceRecoveryFlag_SetProperty"><![CDATA[NOT Installed]]></Custom>
-      <!-- Stop services first (ServiceControl), then kill tray to avoid watchdog respawn during uninstall -->
-      <Custom Action="KillTray_SetProperty" After="StopServices"><![CDATA[REMOVE="ALL"]]></Custom>
-      <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
+      <!-- Kill tray during upgrade or uninstall (after service stops) -->
+      <!-- This prevents watchdog from restarting tray during upgrade/uninstall -->
+      <Custom Action="KillTray_SetProperty" After="StopServices"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      
+      <!-- Set service ACL and recovery on install/upgrade -->
+      <Custom Action="SetServiceAcl_SetProperty" After="InstallServices"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
+      <Custom Action="SetServiceAcl" After="SetServiceAcl_SetProperty"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
+      <Custom Action="SetServiceRecovery_SetProperty" After="InstallServices"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
+      <Custom Action="SetServiceRecovery" After="SetServiceRecovery_SetProperty"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
+      <Custom Action="SetServiceRecoveryFlag_SetProperty" After="InstallServices"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
+      <Custom Action="SetServiceRecoveryFlag" After="SetServiceRecoveryFlag_SetProperty"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
     </InstallExecuteSequence>
 
     <!-- Launch tray after install only when UI is present -->
