@@ -619,7 +619,17 @@ export class AdherenceCalculationService {
       }
     }
 
-    // If no activity events tracked, assume all available time is work app time
+    // Calculate total tracked time from activity events
+    const totalTrackedTime = workAppTimeMinutes + nonWorkAppTimeMinutes;
+    
+    // If we have gaps (availableTimeMinutes > totalTrackedTime), fill them
+    if (availableTimeMinutes > totalTrackedTime) {
+      const gapMinutes = availableTimeMinutes - totalTrackedTime;
+      // Assume gaps are work time (agent is logged in and working)
+      workAppTimeMinutes += gapMinutes;
+    }
+
+    // If no activity events tracked at all, assume all available time is work app time
     if (workAppTimeMinutes === 0 && nonWorkAppTimeMinutes === 0 && availableTimeMinutes > 0) {
       workAppTimeMinutes = availableTimeMinutes;
     }
