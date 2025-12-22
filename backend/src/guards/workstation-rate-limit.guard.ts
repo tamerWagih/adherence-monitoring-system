@@ -44,29 +44,41 @@ export class WorkstationRateLimitGuard implements CanActivate {
       // Check if Redis is connected
       if (this.redis.status !== 'ready' && this.redis.status !== 'connecting') {
         // Redis not connected - fail open (allow request)
+        console.warn(`Rate limit guard: Redis not ready (status: ${this.redis.status}), allowing request`);
         return true;
       }
 
-      // Add timeout to prevent hanging (1 second timeout for rate limit check)
+      // Add timeout to prevent hanging (2 second timeout for rate limit check)
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Redis operation timeout')), 1000);
+        setTimeout(() => reject(new Error('Redis operation timeout')), 2000);
       });
 
-      // Get current count with timeout
-      const count = await Promise.race([
-        this.redis.get(key),
+      // Use INCR instead of GET+INCR to ensure atomicity
+      // INCR returns the new count after incrementing
+      const newCount = await Promise.race([
+        this.redis.incr(key),
         timeoutPromise,
-      ]).catch(() => null) as string | null;
+      ]).catch((err) => {
+        console.warn(`Rate limit guard: Redis INCR timeout/error for ${key}: ${err.message}`);
+        return null;
+      }) as number | null;
       
       // If timeout or error, fail open
-      if (count === null) {
+      if (newCount === null) {
         return true;
       }
 
-      const currentCount = parseInt(count, 10) || 0;
+      // Set TTL on first request (when count is 1)
+      if (newCount === 1) {
+        // Fire and forget - set TTL, don't wait
+        this.redis.expire(key, this.ttl).catch(() => {
+          // Ignore errors - TTL is best effort
+        });
+      }
 
-      if (currentCount >= this.limit) {
-        // Rate limit exceeded - get remaining TTL with timeout
+      // Check if limit exceeded (after increment)
+      if (newCount > this.limit) {
+        // Rate limit exceeded - get remaining TTL
         const remainingTtl = await Promise.race([
           this.redis.ttl(key),
           timeoutPromise,
@@ -87,15 +99,6 @@ export class WorkstationRateLimitGuard implements CanActivate {
         );
       }
 
-      // Increment counter and set TTL with timeout (fire and forget - don't wait)
-      const pipeline = this.redis.pipeline();
-      pipeline.incr(key);
-      pipeline.expire(key, this.ttl);
-      // Don't await - fire and forget to avoid blocking
-      pipeline.exec().catch(() => {
-        // Ignore errors - rate limiting is best effort
-      });
-
       return true;
     } catch (error) {
       // If Redis error, log and allow request (fail open)
@@ -104,6 +107,7 @@ export class WorkstationRateLimitGuard implements CanActivate {
       }
 
       // Fail open - allow request if Redis is unavailable or timeout
+      console.warn(`Rate limit guard: Error for ${key}, allowing request: ${error.message}`);
       return true;
     }
   }
