@@ -455,10 +455,16 @@ export class AdherenceCalculationService {
       };
     }
 
+    // Sort events by timestamp BEFORE processing idle periods
+    // This ensures IDLE_START always comes before IDLE_END
+    const sortedEventsForIdle = [...events].sort((a, b) => 
+      a.eventTimestamp.getTime() - b.eventTimestamp.getTime()
+    );
+
     // Track idle periods (these reduce productive time)
     let idleStart: Date | null = null;
     const idlePeriods: Array<{ start: Date; end: Date }> = [];
-    for (const event of events) {
+    for (const event of sortedEventsForIdle) {
       if (event.eventType === EventType.IDLE_START) {
         idleStart = event.eventTimestamp;
       } else if (event.eventType === EventType.IDLE_END && idleStart) {
