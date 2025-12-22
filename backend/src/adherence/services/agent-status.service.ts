@@ -95,7 +95,7 @@ export class AgentStatusService {
                 : null,
               scheduledMinutes: adherence.scheduledDurationMinutes,
               actualMinutes: adherence.actualDurationMinutes,
-              exceptionsCount: adherence.exceptionsCount ?? 0, // Default to 0 if not available
+              exceptionsCount: 0, // Not stored in database (exception_adjustments JSONB contains exception data)
               scheduleDate: adherence.scheduleDate,
             }
           : null,

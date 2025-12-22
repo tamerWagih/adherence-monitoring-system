@@ -39,7 +39,7 @@ export class AgentAdherenceException {
     type: 'varchar',
     length: 50,
   })
-  exceptionType: string; // LATE_START, EARLY_END, MISSED_BREAK, EXTENDED_BREAK, TECHNICAL_ISSUE, OTHER
+  exceptionType: string; // TRAINING, SYSTEM_OUTAGE, MEETING, EMERGENCY, OTHER (database constraint)
 
   @Column({ name: 'exception_date', type: 'date' })
   exceptionDate: Date;
