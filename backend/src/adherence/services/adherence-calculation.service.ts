@@ -403,26 +403,24 @@ export class AdherenceCalculationService {
     }
 
     // Calculate work/non-work app time from WINDOW_CHANGE and APPLICATION_FOCUS events
-    // We need to track time spent in each application
-    const appTimeMap = new Map<string, { start: Date; isWork: boolean }>();
+    // Track time spent in each application between events
+    let currentAppStart: Date | null = null;
+    let currentAppIsWork: boolean | null = null;
     let lastEventTime: Date | null = null;
 
     for (const event of events) {
       const eventTime = event.eventTimestamp;
 
-      // Calculate time since last event for previous app
-      if (lastEventTime && appTimeMap.size > 0) {
+      // Calculate time since last event for current app
+      if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null) {
         const durationMs = eventTime.getTime() - lastEventTime.getTime();
         const durationMinutes = Math.round(durationMs / (1000 * 60));
 
-        // Add time to all active apps
-        for (const [appKey, appData] of appTimeMap.entries()) {
-          if (appData.isWork) {
-            workAppTimeMinutes += durationMinutes;
-            productiveTimeMinutes += durationMinutes;
-          } else {
-            nonWorkAppTimeMinutes += durationMinutes;
-          }
+        if (currentAppIsWork) {
+          workAppTimeMinutes += durationMinutes;
+          productiveTimeMinutes += durationMinutes;
+        } else {
+          nonWorkAppTimeMinutes += durationMinutes;
         }
       }
 
@@ -431,15 +429,33 @@ export class AdherenceCalculationService {
         event.eventType === EventType.WINDOW_CHANGE ||
         event.eventType === EventType.APPLICATION_FOCUS
       ) {
-        const appKey = event.applicationName || 'unknown';
-        const isWork = event.isWorkApplication === true;
-
-        // Clear previous apps and set new one
-        appTimeMap.clear();
-        appTimeMap.set(appKey, { start: eventTime, isWork });
+        currentAppStart = eventTime;
+        currentAppIsWork = event.isWorkApplication === true;
       }
 
       lastEventTime = eventTime;
+    }
+
+    // Calculate time for the last app until end of shift (if schedule end time available)
+    if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null && schedule.shiftEnd) {
+      // Parse scheduled end time and convert to Date
+      const [endHours, endMinutes] = schedule.shiftEnd.split(':').map(Number);
+      const scheduleDateStr = lastEventTime.toISOString().split('T')[0];
+      const scheduledEndDateTime = new Date(`${scheduleDateStr}T${schedule.shiftEnd}${this.EGYPT_TIMEZONE}`);
+      const scheduledEndUTC = new Date(scheduledEndDateTime.toISOString());
+
+      // Only add time if last event is before scheduled end
+      if (lastEventTime < scheduledEndUTC) {
+        const durationMs = scheduledEndUTC.getTime() - lastEventTime.getTime();
+        const durationMinutes = Math.round(durationMs / (1000 * 60));
+
+        if (currentAppIsWork) {
+          workAppTimeMinutes += durationMinutes;
+          productiveTimeMinutes += durationMinutes;
+        } else {
+          nonWorkAppTimeMinutes += durationMinutes;
+        }
+      }
     }
 
     return {
@@ -459,15 +475,35 @@ export class AdherenceCalculationService {
     scheduleDate: Date,
   ): Promise<AgentAdherenceException[]> {
     const dateStr = scheduleDate.toISOString().split('T')[0];
-    const exceptionDateObj = new Date(dateStr + 'T00:00:00Z');
     
-    return this.exceptionRepo.find({
-      where: {
-        employeeId,
-        exceptionDate: exceptionDateObj as any, // TypeORM date comparison
-        status: 'APPROVED',
-      },
-    });
+    // Use raw query for date comparison to ensure correct matching
+    const results = await this.exceptionRepo.query(
+      `
+      SELECT * FROM agent_adherence_exceptions
+      WHERE employee_id = $1
+        AND exception_date = $2::date
+        AND status = $3
+      `,
+      [employeeId, dateStr, 'APPROVED'],
+    );
+
+    // Convert raw results to entity objects
+    return results.map((row: any) => ({
+      id: row.id,
+      employeeId: row.employee_id,
+      exceptionType: row.exception_type,
+      exceptionDate: row.exception_date,
+      status: row.status,
+      justification: row.justification,
+      requestedAdjustmentMinutes: row.requested_adjustment_minutes,
+      approvedAdjustmentMinutes: row.approved_adjustment_minutes,
+      createdBy: row.created_by,
+      reviewedBy: row.reviewed_by,
+      reviewNotes: row.review_notes,
+      reviewedAt: row.reviewed_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })) as AgentAdherenceException[];
   }
 
   /**
@@ -577,13 +613,20 @@ export class AdherenceCalculationService {
     const dateStr = data.scheduleDate.toISOString().split('T')[0];
     const scheduleDateObj = new Date(dateStr + 'T00:00:00Z');
 
-    // Check if summary already exists
-    const existing = await this.summaryRepo.findOne({
-      where: {
-        employeeId: data.employeeId,
-        scheduleDate: scheduleDateObj as any,
-      },
-    });
+    // Check if summary already exists (use raw query for date comparison)
+    const existingResults = await this.summaryRepo.query(
+      `
+      SELECT * FROM agent_adherence_summaries
+      WHERE employee_id = $1
+        AND schedule_date = $2::date
+      LIMIT 1
+      `,
+      [data.employeeId, dateStr],
+    );
+
+    const existing = existingResults.length > 0
+      ? await this.summaryRepo.findOne({ where: { id: existingResults[0].id } })
+      : null;
 
     const exceptionAdjustments = data.exceptions.map((e) => ({
       id: e.id,
