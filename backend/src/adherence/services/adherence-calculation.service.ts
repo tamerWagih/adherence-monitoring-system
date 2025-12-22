@@ -368,6 +368,12 @@ export class AdherenceCalculationService {
   /**
    * Calculate activity metrics from events
    * 
+   * Simplified approach:
+   * 1. Start with total time from LOGIN to LOGOFF (or schedule end)
+   * 2. Subtract idle periods
+   * 3. Subtract break periods
+   * 4. Track activity events to determine work vs non-work app time
+   * 
    * Handles ALL event types:
    * - LOGIN/LOGOFF: Define work boundaries
    * - IDLE_START/IDLE_END: Reduce productive time
@@ -392,6 +398,26 @@ export class AdherenceCalculationService {
       ? logoffEvents[logoffEvents.length - 1].eventTimestamp 
       : null;
 
+    // Use schedule end if no LOGOFF event
+    let workEndTime = actualEndTime;
+    if (!workEndTime && schedule.shiftEnd && actualStartTime) {
+      const [endHours, endMinutes] = schedule.shiftEnd.split(':').map(Number);
+      const scheduleDateStr = actualStartTime.toISOString().split('T')[0];
+      const scheduledEndDateTime = new Date(`${scheduleDateStr}T${schedule.shiftEnd}${this.EGYPT_TIMEZONE}`);
+      workEndTime = new Date(scheduledEndDateTime.toISOString());
+    }
+
+    if (!actualStartTime || !workEndTime) {
+      // No valid work period
+      return {
+        productiveTimeMinutes: 0,
+        idleTimeMinutes: 0,
+        awayTimeMinutes: 0,
+        nonWorkAppTimeMinutes: 0,
+        workAppTimeMinutes: 0,
+      };
+    }
+
     // Track idle periods (these reduce productive time)
     let idleStart: Date | null = null;
     const idlePeriods: Array<{ start: Date; end: Date }> = [];
@@ -406,10 +432,10 @@ export class AdherenceCalculationService {
       }
     }
     // Handle idle that extends to end of shift
-    if (idleStart && actualEndTime) {
-      const durationMs = actualEndTime.getTime() - idleStart.getTime();
+    if (idleStart && workEndTime) {
+      const durationMs = workEndTime.getTime() - idleStart.getTime();
       idleTimeMinutes += Math.round(durationMs / (1000 * 60));
-      idlePeriods.push({ start: idleStart, end: actualEndTime });
+      idlePeriods.push({ start: idleStart, end: workEndTime });
     }
 
     // Track break periods (excluded from productive time)
@@ -424,8 +450,8 @@ export class AdherenceCalculationService {
       }
     }
     // Handle break that extends to end of shift
-    if (breakStart && actualEndTime) {
-      breakPeriods.push({ start: breakStart, end: actualEndTime });
+    if (breakStart && workEndTime) {
+      breakPeriods.push({ start: breakStart, end: workEndTime });
     }
 
     // Track away periods (LOGOFF to LOGIN gaps)
@@ -439,17 +465,6 @@ export class AdherenceCalculationService {
         logoffTime = null;
       }
     }
-
-    // Helper function to check if a time period overlaps with idle/break
-    const isExcludedTime = (start: Date, end: Date): boolean => {
-      for (const idle of idlePeriods) {
-        if (start < idle.end && end > idle.start) return true;
-      }
-      for (const breakPeriod of breakPeriods) {
-        if (start < breakPeriod.end && end > breakPeriod.start) return true;
-      }
-      return false;
-    };
 
     // Helper function to check if event indicates active work
     const isActivityEvent = (eventType: string): boolean => {
@@ -466,148 +481,93 @@ export class AdherenceCalculationService {
       );
     };
 
-    // Sort events by timestamp to ensure correct order
+    // Calculate total work time (from LOGIN to LOGOFF/schedule end)
+    const totalWorkTimeMs = workEndTime.getTime() - actualStartTime.getTime();
+    const totalWorkTimeMinutes = Math.round(totalWorkTimeMs / (1000 * 60));
+
+    // Calculate excluded time (idle + breaks)
+    let excludedTimeMinutes = 0;
+    for (const idle of idlePeriods) {
+      const durationMs = idle.end.getTime() - idle.start.getTime();
+      excludedTimeMinutes += Math.round(durationMs / (1000 * 60));
+    }
+    for (const breakPeriod of breakPeriods) {
+      const durationMs = breakPeriod.end.getTime() - breakPeriod.start.getTime();
+      excludedTimeMinutes += Math.round(durationMs / (1000 * 60));
+    }
+
+    // Start with total work time minus excluded time
+    let availableTimeMinutes = totalWorkTimeMinutes - excludedTimeMinutes;
+
+    // Now track activity events to determine work vs non-work app time
+    // Sort events by timestamp
     const sortedEvents = [...events].sort((a, b) => 
       a.eventTimestamp.getTime() - b.eventTimestamp.getTime()
     );
 
-    // Track current state
+    // Track periods of work vs non-work app usage
     let currentAppStart: Date | null = null;
     let currentAppIsWork: boolean | null = null;
-    let lastEventTime: Date | null = actualStartTime; // Start from LOGIN time
-    let firstActivityEventTime: Date | null = null;
-    let isCurrentlyIdle = false;
-    let isCurrentlyOnBreak = false;
+    let lastEventTime: Date | null = actualStartTime;
 
-    // Process all events in chronological order
     for (const event of sortedEvents) {
       const eventTime = event.eventTimestamp;
 
-      // Handle LOGIN - start tracking from here
-      if (event.eventType === EventType.LOGIN) {
+      // Skip events outside work period
+      if (eventTime < actualStartTime || eventTime > workEndTime) {
+        continue;
+      }
+
+      // Skip LOGIN/LOGOFF (already handled)
+      if (event.eventType === EventType.LOGIN || event.eventType === EventType.LOGOFF) {
         lastEventTime = eventTime;
         continue;
       }
 
-      // Handle LOGOFF - stop tracking productive time
-      if (event.eventType === EventType.LOGOFF) {
-        // Calculate time from last event to LOGOFF
-        if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null) {
-          const durationMs = eventTime.getTime() - lastEventTime.getTime();
-          const durationMinutes = Math.round(durationMs / (1000 * 60));
-          
-          // Only count if not idle or on break
-          if (!isExcludedTime(lastEventTime, eventTime)) {
-            if (currentAppIsWork) {
-              workAppTimeMinutes += durationMinutes;
-              productiveTimeMinutes += durationMinutes;
-            } else {
-              nonWorkAppTimeMinutes += durationMinutes;
-            }
-          }
-        }
-        lastEventTime = eventTime;
-        currentAppStart = null;
-        currentAppIsWork = null;
-        continue;
-      }
-
-      // Handle IDLE_START - mark as idle
-      if (event.eventType === EventType.IDLE_START) {
-        isCurrentlyIdle = true;
-        // Calculate time from last event to idle start
-        if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null) {
-          const durationMs = eventTime.getTime() - lastEventTime.getTime();
-          const durationMinutes = Math.round(durationMs / (1000 * 60));
-          
-          if (!isExcludedTime(lastEventTime, eventTime)) {
-            if (currentAppIsWork) {
-              workAppTimeMinutes += durationMinutes;
-              productiveTimeMinutes += durationMinutes;
-            } else {
-              nonWorkAppTimeMinutes += durationMinutes;
-            }
-          }
-        }
+      // Skip IDLE_START/IDLE_END and BREAK_START/BREAK_END (already handled)
+      if (
+        event.eventType === EventType.IDLE_START ||
+        event.eventType === EventType.IDLE_END ||
+        event.eventType === EventType.BREAK_START ||
+        event.eventType === EventType.BREAK_END
+      ) {
         lastEventTime = eventTime;
         continue;
-      }
-
-      // Handle IDLE_END - resume tracking
-      if (event.eventType === EventType.IDLE_END) {
-        isCurrentlyIdle = false;
-        lastEventTime = eventTime;
-        continue;
-      }
-
-      // Handle BREAK_START - exclude from productive time
-      if (event.eventType === EventType.BREAK_START) {
-        isCurrentlyOnBreak = true;
-        // Calculate time from last event to break start
-        if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null) {
-          const durationMs = eventTime.getTime() - lastEventTime.getTime();
-          const durationMinutes = Math.round(durationMs / (1000 * 60));
-          
-          if (!isExcludedTime(lastEventTime, eventTime)) {
-            if (currentAppIsWork) {
-              workAppTimeMinutes += durationMinutes;
-              productiveTimeMinutes += durationMinutes;
-            } else {
-              nonWorkAppTimeMinutes += durationMinutes;
-            }
-          }
-        }
-        lastEventTime = eventTime;
-        continue;
-      }
-
-      // Handle BREAK_END - resume tracking
-      if (event.eventType === EventType.BREAK_END) {
-        isCurrentlyOnBreak = false;
-        lastEventTime = eventTime;
-        continue;
-      }
-
-      // Skip if currently idle or on break (unless it's an activity event that ends idle/break)
-      if (isCurrentlyIdle || isCurrentlyOnBreak) {
-        if (!isActivityEvent(event.eventType)) {
-          lastEventTime = eventTime;
-          continue;
-        }
       }
 
       // Calculate time since last event for current app
       if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null) {
         const durationMs = eventTime.getTime() - lastEventTime.getTime();
         const durationMinutes = Math.round(durationMs / (1000 * 60));
-        
-        // Only count if not idle or on break
-        if (!isExcludedTime(lastEventTime, eventTime)) {
+
+        // Check if this period overlaps with idle/break
+        let isExcluded = false;
+        for (const idle of idlePeriods) {
+          if (lastEventTime < idle.end && eventTime > idle.start) {
+            isExcluded = true;
+            break;
+          }
+        }
+        if (!isExcluded) {
+          for (const breakPeriod of breakPeriods) {
+            if (lastEventTime < breakPeriod.end && eventTime > breakPeriod.start) {
+              isExcluded = true;
+              break;
+            }
+          }
+        }
+
+        if (!isExcluded) {
           if (currentAppIsWork) {
             workAppTimeMinutes += durationMinutes;
-            productiveTimeMinutes += durationMinutes;
           } else {
             nonWorkAppTimeMinutes += durationMinutes;
           }
         }
       }
 
-      // Handle activity events (window changes, app starts, browser tabs, etc.)
+      // Handle activity events
       if (isActivityEvent(event.eventType)) {
-        // If this is the first activity event and we have a start time, count time from start to first activity event as productive
-        if (firstActivityEventTime === null && actualStartTime && lastEventTime) {
-          const durationMs = eventTime.getTime() - lastEventTime.getTime();
-          const durationMinutes = Math.round(durationMs / (1000 * 60));
-          
-          // Only count if not idle or on break
-          if (!isExcludedTime(lastEventTime, eventTime)) {
-            // Assume productive time from LOGIN until first activity event (agent is logged in and working)
-            workAppTimeMinutes += durationMinutes;
-            productiveTimeMinutes += durationMinutes;
-          }
-          firstActivityEventTime = eventTime;
-        }
-        
         // APPLICATION_END means app closed, so stop tracking that app
         if (event.eventType === EventType.APPLICATION_END) {
           currentAppStart = null;
@@ -623,38 +583,49 @@ export class AdherenceCalculationService {
       lastEventTime = eventTime;
     }
 
-    // Calculate time from last event to end of shift (if schedule end time available)
-    if (lastEventTime && schedule.shiftEnd) {
-      const [endHours, endMinutes] = schedule.shiftEnd.split(':').map(Number);
-      const scheduleDateStr = lastEventTime.toISOString().split('T')[0];
-      const scheduledEndDateTime = new Date(`${scheduleDateStr}T${schedule.shiftEnd}${this.EGYPT_TIMEZONE}`);
-      const scheduledEndUTC = new Date(scheduledEndDateTime.toISOString());
+    // Calculate time from last event to end of work period
+    if (lastEventTime && lastEventTime < workEndTime) {
+      const durationMs = workEndTime.getTime() - lastEventTime.getTime();
+      const durationMinutes = Math.round(durationMs / (1000 * 60));
 
-      // Only add time if last event is before scheduled end
-      if (lastEventTime < scheduledEndUTC) {
-        const durationMs = scheduledEndUTC.getTime() - lastEventTime.getTime();
-        const durationMinutes = Math.round(durationMs / (1000 * 60));
-
-        // Only count if we have an active app and not idle/on break
-        if (currentAppStart !== null && currentAppIsWork !== null && !isCurrentlyIdle && !isCurrentlyOnBreak) {
-          if (!isExcludedTime(lastEventTime, scheduledEndUTC)) {
-            if (currentAppIsWork) {
-              workAppTimeMinutes += durationMinutes;
-              productiveTimeMinutes += durationMinutes;
-            } else {
-              nonWorkAppTimeMinutes += durationMinutes;
-            }
-          }
-        } else if (firstActivityEventTime === null && actualStartTime) {
-          // No activity events, count from LOGIN to shift end as productive (minus idle/break)
-          if (!isExcludedTime(actualStartTime, scheduledEndUTC)) {
-            const totalMinutes = Math.round((scheduledEndUTC.getTime() - actualStartTime.getTime()) / (1000 * 60));
-            workAppTimeMinutes += totalMinutes;
-            productiveTimeMinutes += totalMinutes;
+      // Check if this period overlaps with idle/break
+      let isExcluded = false;
+      for (const idle of idlePeriods) {
+        if (lastEventTime < idle.end && workEndTime > idle.start) {
+          isExcluded = true;
+          break;
+        }
+      }
+      if (!isExcluded) {
+        for (const breakPeriod of breakPeriods) {
+          if (lastEventTime < breakPeriod.end && workEndTime > breakPeriod.start) {
+            isExcluded = true;
+            break;
           }
         }
       }
+
+      if (!isExcluded) {
+        if (currentAppIsWork !== null) {
+          if (currentAppIsWork) {
+            workAppTimeMinutes += durationMinutes;
+          } else {
+            nonWorkAppTimeMinutes += durationMinutes;
+          }
+        } else {
+          // No app tracked, assume work time (agent is logged in)
+          workAppTimeMinutes += durationMinutes;
+        }
+      }
     }
+
+    // If no activity events tracked, assume all available time is work app time
+    if (workAppTimeMinutes === 0 && nonWorkAppTimeMinutes === 0 && availableTimeMinutes > 0) {
+      workAppTimeMinutes = availableTimeMinutes;
+    }
+
+    // Productive time = work app time (non-work app time is already excluded)
+    productiveTimeMinutes = workAppTimeMinutes;
 
     return {
       productiveTimeMinutes,
