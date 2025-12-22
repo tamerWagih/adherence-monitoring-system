@@ -4,6 +4,18 @@ import { Job } from 'bullmq';
 import { EventIngestionService } from '../services/event-ingestion.service';
 import { CreateAdherenceEventDto } from '../../dto/create-adherence-event.dto';
 
+const QUEUE_WORKER_CONCURRENCY = parseInt(
+  process.env.QUEUE_WORKER_CONCURRENCY ||
+    process.env.QUEUE_CONCURRENCY || // support existing env naming in deployment
+    '5',
+  10,
+);
+
+const QUEUE_WORKER_MAX_JOBS = parseInt(
+  process.env.QUEUE_WORKER_MAX_JOBS || process.env.QUEUE_MAX_JOBS || '500',
+  10,
+);
+
 /**
  * EventIngestionProcessor
  * 
@@ -16,9 +28,9 @@ import { CreateAdherenceEventDto } from '../../dto/create-adherence-event.dto';
  * - Supports both single events and batch events
  */
 @Processor('event-ingestion', {
-  concurrency: parseInt(process.env.QUEUE_WORKER_CONCURRENCY || '30', 10), // Process 30 jobs concurrently (configurable)
+  concurrency: QUEUE_WORKER_CONCURRENCY,
   limiter: {
-    max: parseInt(process.env.QUEUE_WORKER_MAX_JOBS || '500', 10), // Max 500 jobs per duration
+    max: QUEUE_WORKER_MAX_JOBS, // Max jobs per duration
     duration: 1000, // Per 1 second
   },
 })
