@@ -406,12 +406,29 @@ export class AdherenceCalculationService {
       }
     }
 
-    // Calculate work/non-work app time from WINDOW_CHANGE and APPLICATION_FOCUS events
-    // Track time spent in each application between events
+    // Calculate work/non-work app time from activity events
+    // Desktop app sends: WINDOW_CHANGE, APPLICATION_START, APPLICATION_END, BROWSER_TAB_CHANGE, 
+    // CLIENT_WEBSITE_ACCESS, CALLING_APP_IN_CALL, APPLICATION_FOCUS
+    // All of these indicate active work when is_work_application=true
     let currentAppStart: Date | null = null;
     let currentAppIsWork: boolean | null = null;
     let lastEventTime: Date | null = actualStartTime; // Start from LOGIN time
-    let firstAppEventTime: Date | null = null;
+    let firstActivityEventTime: Date | null = null;
+
+    // Helper function to check if event indicates active work
+    const isActivityEvent = (eventType: string): boolean => {
+      return (
+        eventType === EventType.WINDOW_CHANGE ||
+        eventType === EventType.APPLICATION_FOCUS ||
+        eventType === EventType.APPLICATION_START ||
+        eventType === EventType.BROWSER_TAB_CHANGE ||
+        eventType === EventType.CLIENT_WEBSITE_ACCESS ||
+        eventType === EventType.CALLING_APP_IN_CALL ||
+        eventType === EventType.CALLING_APP_START ||
+        eventType === EventType.TEAMS_MEETING_START ||
+        eventType === EventType.TEAMS_CHAT_ACTIVE
+      );
+    };
 
     // Sort events by timestamp to ensure correct order
     const sortedEvents = [...events].sort((a, b) => 
@@ -420,6 +437,12 @@ export class AdherenceCalculationService {
 
     for (const event of sortedEvents) {
       const eventTime = event.eventTimestamp;
+
+      // Skip break events for productive time calculation
+      if (event.eventType === EventType.BREAK_START || event.eventType === EventType.BREAK_END) {
+        lastEventTime = eventTime;
+        continue;
+      }
 
       // Calculate time since last event for current app
       if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null) {
@@ -434,30 +457,35 @@ export class AdherenceCalculationService {
         }
       }
 
-      // Handle window/application events
-      if (
-        event.eventType === EventType.WINDOW_CHANGE ||
-        event.eventType === EventType.APPLICATION_FOCUS
-      ) {
-        // If this is the first app event and we have a start time, count time from start to first app event as productive
-        if (firstAppEventTime === null && actualStartTime && lastEventTime) {
+      // Handle activity events (window changes, app starts, browser tabs, etc.)
+      if (isActivityEvent(event.eventType)) {
+        // If this is the first activity event and we have a start time, count time from start to first activity event as productive
+        if (firstActivityEventTime === null && actualStartTime && lastEventTime) {
           const durationMs = eventTime.getTime() - lastEventTime.getTime();
           const durationMinutes = Math.round(durationMs / (1000 * 60));
-          // Assume productive time from LOGIN until first app event (agent is logged in and working)
+          // Assume productive time from LOGIN until first activity event (agent is logged in and working)
           workAppTimeMinutes += durationMinutes;
           productiveTimeMinutes += durationMinutes;
-          firstAppEventTime = eventTime;
+          firstActivityEventTime = eventTime;
         }
         
-        currentAppStart = eventTime;
-        currentAppIsWork = event.isWorkApplication === true;
+        // APPLICATION_END means app closed, so stop tracking that app
+        if (event.eventType === EventType.APPLICATION_END) {
+          currentAppStart = null;
+          currentAppIsWork = null;
+        } else {
+          // Start tracking new app/activity
+          currentAppStart = eventTime;
+          // Default to work application if not specified (most activity is work-related)
+          currentAppIsWork = event.isWorkApplication !== undefined ? event.isWorkApplication : true;
+        }
       }
 
       lastEventTime = eventTime;
     }
 
-    // If no APPLICATION_FOCUS events exist, count entire shift from LOGIN as productive
-    if (firstAppEventTime === null && actualStartTime && schedule.shiftEnd) {
+    // If no activity events exist, count entire shift from LOGIN as productive
+    if (firstActivityEventTime === null && actualStartTime && schedule.shiftEnd) {
       const [endHours, endMinutes] = schedule.shiftEnd.split(':').map(Number);
       const scheduleDateStr = actualStartTime.toISOString().split('T')[0];
       const scheduledEndDateTime = new Date(`${scheduleDateStr}T${schedule.shiftEnd}${this.EGYPT_TIMEZONE}`);
