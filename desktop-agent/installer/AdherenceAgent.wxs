@@ -156,17 +156,17 @@
 
     <InstallExecuteSequence>
       <!-- Stop service + kill tray BEFORE RemoveExistingProducts to prevent rollback/file locks -->
-      <Custom Action="DisableServiceRecovery_SetProperty" Before="DisableServiceRecovery"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
-      <Custom Action="DisableServiceRecovery" Before="StopService"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="DisableServiceRecovery_SetProperty" Before="DisableServiceRecovery"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
+      <Custom Action="DisableServiceRecovery" Before="StopService"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
 
-      <Custom Action="StopService_SetProperty" Before="StopService"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
-      <Custom Action="StopService" Before="KillService_SetProperty"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="StopService_SetProperty" Before="StopService"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
+      <Custom Action="StopService" Before="KillService_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
 
-      <Custom Action="KillService_SetProperty" Before="KillService"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
-      <Custom Action="KillService" Before="KillTray_SetProperty"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillService_SetProperty" Before="KillService"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillService" Before="KillTray_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
 
-      <Custom Action="KillTray_SetProperty" Before="KillTray"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
-      <Custom Action="KillTray" Before="RemoveExistingProducts"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillTray_SetProperty" Before="KillTray"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillTray" Before="RemoveExistingProducts"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
 
       <!-- Set service ACL and recovery on install/upgrade -->
       <!-- Service exists after InstallServices, and Return="ignore" handles any errors gracefully -->
