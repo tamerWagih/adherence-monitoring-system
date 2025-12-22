@@ -574,27 +574,30 @@ export class AdherenceCalculationService {
 
       // Calculate time since last event for current app
       if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null) {
-        const durationMs = eventTime.getTime() - lastEventTime.getTime();
-        const durationMinutes = Math.round(durationMs / (1000 * 60));
-
-        // Check if this period overlaps with idle/break
-        let isExcluded = false;
+        // Calculate actual work time in this period (excluding idle/break overlaps)
+        let workTimeMs = eventTime.getTime() - lastEventTime.getTime();
+        
+        // Subtract idle periods that overlap with this time period
         for (const idle of idlePeriods) {
-          if (lastEventTime < idle.end && eventTime > idle.start) {
-            isExcluded = true;
-            break;
+          const overlapStart = Math.max(lastEventTime.getTime(), idle.start.getTime());
+          const overlapEnd = Math.min(eventTime.getTime(), idle.end.getTime());
+          if (overlapStart < overlapEnd) {
+            workTimeMs -= (overlapEnd - overlapStart);
           }
         }
-        if (!isExcluded) {
-          for (const breakPeriod of breakPeriods) {
-            if (lastEventTime < breakPeriod.end && eventTime > breakPeriod.start) {
-              isExcluded = true;
-              break;
-            }
+        
+        // Subtract break periods that overlap with this time period
+        for (const breakPeriod of breakPeriods) {
+          const overlapStart = Math.max(lastEventTime.getTime(), breakPeriod.start.getTime());
+          const overlapEnd = Math.min(eventTime.getTime(), breakPeriod.end.getTime());
+          if (overlapStart < overlapEnd) {
+            workTimeMs -= (overlapEnd - overlapStart);
           }
         }
-
-        if (!isExcluded) {
+        
+        const durationMinutes = Math.round(workTimeMs / (1000 * 60));
+        
+        if (durationMinutes > 0) {
           if (currentAppIsWork) {
             workAppTimeMinutes += durationMinutes;
           } else {
@@ -622,27 +625,30 @@ export class AdherenceCalculationService {
 
     // Calculate time from last event to end of work period
     if (lastEventTime && lastEventTime < workEndTime) {
-      const durationMs = workEndTime.getTime() - lastEventTime.getTime();
-      const durationMinutes = Math.round(durationMs / (1000 * 60));
-
-      // Check if this period overlaps with idle/break
-      let isExcluded = false;
+      // Calculate actual work time in this period (excluding idle/break overlaps)
+      let workTimeMs = workEndTime.getTime() - lastEventTime.getTime();
+      
+      // Subtract idle periods that overlap with this time period
       for (const idle of idlePeriods) {
-        if (lastEventTime < idle.end && workEndTime > idle.start) {
-          isExcluded = true;
-          break;
+        const overlapStart = Math.max(lastEventTime.getTime(), idle.start.getTime());
+        const overlapEnd = Math.min(workEndTime.getTime(), idle.end.getTime());
+        if (overlapStart < overlapEnd) {
+          workTimeMs -= (overlapEnd - overlapStart);
         }
       }
-      if (!isExcluded) {
-        for (const breakPeriod of breakPeriods) {
-          if (lastEventTime < breakPeriod.end && workEndTime > breakPeriod.start) {
-            isExcluded = true;
-            break;
-          }
+      
+      // Subtract break periods that overlap with this time period
+      for (const breakPeriod of breakPeriods) {
+        const overlapStart = Math.max(lastEventTime.getTime(), breakPeriod.start.getTime());
+        const overlapEnd = Math.min(workEndTime.getTime(), breakPeriod.end.getTime());
+        if (overlapStart < overlapEnd) {
+          workTimeMs -= (overlapEnd - overlapStart);
         }
       }
-
-      if (!isExcluded) {
+      
+      const durationMinutes = Math.round(workTimeMs / (1000 * 60));
+      
+      if (durationMinutes > 0) {
         if (currentAppIsWork !== null) {
           if (currentAppIsWork) {
             workAppTimeMinutes += durationMinutes;
