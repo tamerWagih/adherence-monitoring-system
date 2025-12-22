@@ -216,9 +216,7 @@
         <ServiceControl Id="ServiceControl"
                         Name="$(var.ServiceName)"
                         Start="install"
-                        Stop="both"
-                        Remove="uninstall"
-                        Wait="yes" />
+                        Remove="uninstall" />
       </Component>
 
       <!-- Cleanup: remove any leftover files in ServiceFolder on uninstall.
