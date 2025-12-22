@@ -103,6 +103,8 @@ public sealed class TrayInteractiveCapture : IDisposable
         private static readonly string[] BrowserProcessNames = { "chrome", "msedge", "firefox", "brave", "opera" };
         // Teams process names (covered by TeamsMonitor)
         private static readonly string[] TeamsProcessNames = { "Teams", "ms-teams" };
+        // Processes to skip for WINDOW_CHANGE events (system/installer processes)
+        private static readonly string[] SkipWindowChangeProcesses = { "msiexec", "explorer" };
 
         public ActiveWindowMonitor(IEventBuffer buffer, ClassificationCache classificationCache, CallingAppCache callingAppCache, Action ok, Action<Exception> fail)
         {
@@ -135,6 +137,9 @@ public sealed class TrayInteractiveCapture : IDisposable
                 var (procName, procPath) = GetProcessInfo(hWnd);
 
                 if (IsMatch(procName, BrowserProcessNames) || IsMatch(procName, TeamsProcessNames)) return;
+                
+                // Skip system/installer processes for WINDOW_CHANGE events
+                if (IsMatch(procName, SkipWindowChangeProcesses)) return;
 
                 if (title == _lastWindowTitle && procPath == _lastProcessPath)
                 {

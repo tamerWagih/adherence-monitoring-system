@@ -67,7 +67,41 @@ try {
     if ($m.Success) { $productVersion = $m.Groups[1].Value }
 } catch { }
 if (-not $productVersion) { $productVersion = "0.0.0" }
-Write-Info "Using ProductVersion: $productVersion"
+Write-Info "Base ProductVersion (from .wxs): $productVersion"
+
+# Auto-version each build to avoid "same version" upgrade/uninstall problems.
+# MSI version format: Major.Minor.Build.Revision, where each part is 0..65535.
+# We keep Major.Minor.Patch from the .wxs and set Revision to a build number.
+#
+# If you want to force a specific version, set environment variable:
+#   $env:ADHERENCE_PRODUCT_VERSION = "1.0.15.123"
+$forcedVersion = $env:ADHERENCE_PRODUCT_VERSION
+if ($forcedVersion) {
+    $newVersion = $forcedVersion
+    Write-Info "Using forced ProductVersion from ADHERENCE_PRODUCT_VERSION: $newVersion"
+} else {
+    $parts = $productVersion.Split('.')
+    $major = if ($parts.Length -ge 1) { $parts[0] } else { "1" }
+    $minor = if ($parts.Length -ge 2) { $parts[1] } else { "0" }
+    $patch = if ($parts.Length -ge 3) { $parts[2] } else { "0" }
+
+    $build = 0
+    try {
+        $cnt = (& git rev-list --count HEAD 2>$null).Trim()
+        if ($cnt) { $build = ([int]$cnt) % 65535 }
+    } catch { }
+    if ($build -le 0) {
+        # Fallback: day-of-year * 100 + hour fits under 65535
+        $now = Get-Date
+        $build = (($now.DayOfYear * 100) + $now.Hour) % 65535
+    }
+
+    $newVersion = "$major.$minor.$patch.$build"
+    Write-Info "Auto-bumped ProductVersion for this build: $newVersion"
+}
+
+$wxsFileToCompile = $wxsFile
+$productVersion = $newVersion
 
 # Clean previous builds
 if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
@@ -75,6 +109,22 @@ if (Test-Path $buildDir) { Remove-Item -Recurse -Force $buildDir }
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+
+# Generate a temporary .wxs with the updated ProductVersion so we don't modify the repo file.
+$generatedWxsFile = Join-Path $buildDir "AdherenceAgent.generated.wxs"
+try {
+    $generatedText = $wxsText
+    $generatedText = [regex]::Replace(
+        $generatedText,
+        '(\<\?define\s+ProductVersion\s*=\s*\")([^\"]+)(\"\s*\?\>)',
+        ('${1}' + $newVersion + '${3}')
+    )
+    Set-Content -Path $generatedWxsFile -Value $generatedText -Encoding UTF8
+    $wxsFileToCompile = $generatedWxsFile
+} catch {
+    Write-Warn "Failed to generate versioned .wxs; falling back to original .wxs"
+    $wxsFileToCompile = $wxsFile
+}
 
 Write-Info "Publishing Service..."
 $serviceBinPath = Join-Path $dist "Service"
@@ -116,7 +166,7 @@ $candleArgs = @(
     "-dServiceBinPath=`"$serviceBinPath`"",
     "-dTrayBinPath=`"$trayBinPath`"",
     "-dLicenseRtfPath=`"$licenseRtfPath`"",
-    "`"$wxsFile`""
+    "`"$wxsFileToCompile`""
 )
 
 & candle.exe $candleArgs

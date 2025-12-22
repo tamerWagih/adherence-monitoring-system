@@ -29,11 +29,10 @@
     <Property Id="MSIUSEREALADMINDETECTION" Value="1" />
 
     <!-- MajorUpgrade: Remove old version before installing new -->
-    <!-- Schedule: RemoveExistingProducts after InstallValidate to ensure old files are removed before new ones are installed -->
+    <!-- Schedule: afterInstallInitialize so we can stop service/tray BEFORE RemoveExistingProducts (prevents rollback/file locks) -->
     <MajorUpgrade 
         DowngradeErrorMessage="A newer version of [ProductName] is already installed."
-        Schedule="afterInstallValidate"
-        AllowSameVersionUpgrades="yes" />
+        Schedule="afterInstallInitialize" />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Installation directory structure -->
@@ -101,7 +100,38 @@
                   Property="SetServiceRecoveryFlag"
                   Value="&quot;[SystemFolder]sc.exe&quot; failureflag $(var.ServiceName) 1" />
 
-    <!-- Ensure tray is not running during uninstall (prevents file locks) -->
+    <!-- Ensure service/tray are not running during upgrade/uninstall (prevents file locks / rollback) -->
+    <!-- Disable recovery first so the service won't auto-restart while MSI is uninstalling the old version -->
+    <CustomAction Id="DisableServiceRecovery"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <CustomAction Id="DisableServiceRecovery_SetProperty"
+                  Property="DisableServiceRecovery"
+                  Value="&quot;[SystemFolder]sc.exe&quot; failure $(var.ServiceName) reset= 0 actions= &quot;&quot;/&quot;&quot;/&quot;&quot; 2&gt;nul" />
+
+    <CustomAction Id="StopService"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <CustomAction Id="StopService_SetProperty"
+                  Property="StopService"
+                  Value="&quot;[SystemFolder]sc.exe&quot; stop $(var.ServiceName) 2&gt;nul" />
+
+    <CustomAction Id="KillService"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <CustomAction Id="KillService_SetProperty"
+                  Property="KillService"
+                  Value="&quot;[SystemFolder]taskkill.exe&quot; /F /T /IM AdherenceAgent.Service.exe 2&gt;nul" />
+
     <CustomAction Id="KillTray"
                   BinaryKey="WixCA"
                   DllEntry="WixQuietExec"
@@ -110,7 +140,7 @@
                   Return="ignore" />
     <CustomAction Id="KillTray_SetProperty"
                   Property="KillTray"
-                  Value="&quot;[SystemFolder]taskkill.exe&quot; /F /T /IM AdherenceAgent.Tray.exe" />
+                  Value="&quot;[SystemFolder]taskkill.exe&quot; /F /T /IM AdherenceAgent.Tray.exe 2&gt;nul" />
 
 
     <!-- Launch tray app after installation (for current user session) -->
@@ -125,10 +155,18 @@
                   Return="ignore" />
 
     <InstallExecuteSequence>
-      <!-- Kill tray during upgrade or uninstall (after service stops) -->
-      <!-- This prevents watchdog from restarting tray during upgrade/uninstall -->
-      <Custom Action="KillTray_SetProperty" After="StopServices"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
-      <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <!-- Stop service + kill tray BEFORE RemoveExistingProducts to prevent rollback/file locks -->
+      <Custom Action="DisableServiceRecovery_SetProperty" Before="DisableServiceRecovery"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="DisableServiceRecovery" Before="StopService"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+
+      <Custom Action="StopService_SetProperty" Before="StopService"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="StopService" Before="KillService_SetProperty"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+
+      <Custom Action="KillService_SetProperty" Before="KillService"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillService" Before="KillTray_SetProperty"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+
+      <Custom Action="KillTray_SetProperty" Before="KillTray"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillTray" Before="RemoveExistingProducts"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
 
       <!-- Set service ACL and recovery on install/upgrade -->
       <!-- Service exists after InstallServices, and Return="ignore" handles any errors gracefully -->

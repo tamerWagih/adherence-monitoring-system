@@ -423,7 +423,11 @@ public class ProcessMonitor
             "IAStorIcon", "IAStorIconLaunch", "IAStorDataMgrSvc",
             "MathWorksServiceHost", "MathWorksServiceHostMonitor",
             "WSHelper", "WsToastNotification", "ServiceShell",
-            "TGitCache", "Copilot"
+            "TGitCache", "Copilot",
+            // Terminal/SSH utilities that spawn frequently
+            "XWin_MobaX", "MobaXterm", "XWin",
+            // Installer processes
+            "msiexec"
         };
 
         foreach (var skip in skipProcesses)
