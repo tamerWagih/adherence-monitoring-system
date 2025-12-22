@@ -291,6 +291,10 @@ export class AdherenceCalculationService {
       duration_minutes: s.break_duration || 0,
     }));
 
+    this.logger.debug(
+      `Break compliance: Found ${scheduledBreaks.length} scheduled break(s) for ${employeeId} on ${dateStr}`,
+    );
+
     // Get actual breaks from events
     const actualBreaks: Array<{
       start: Date;
@@ -310,9 +314,16 @@ export class AdherenceCalculationService {
           end: event.eventTimestamp,
           duration_minutes: durationMinutes,
         });
+        this.logger.debug(
+          `Break compliance: Found actual break ${breakStart.toISOString()} to ${event.eventTimestamp.toISOString()} (${durationMinutes} minutes)`,
+        );
         breakStart = null;
       }
     }
+
+    this.logger.debug(
+      `Break compliance: Found ${actualBreaks.length} actual break(s)`,
+    );
 
     // Match actual breaks to scheduled breaks
     // Use a set to track which actual breaks have been matched (prevent double-matching)
@@ -350,8 +361,14 @@ export class AdherenceCalculationService {
         if (matchingBreak.duration_minutes > scheduled.duration_minutes + EXTENDED_BREAK_THRESHOLD) {
           extendedBreaks++;
         }
+        this.logger.debug(
+          `Break compliance: Scheduled break ${scheduled.start}-${scheduled.end} matched actual break ${matchingBreak.start.toISOString()}-${matchingBreak.end.toISOString()} (extended: ${matchingBreak.duration_minutes > scheduled.duration_minutes + EXTENDED_BREAK_THRESHOLD})`,
+        );
       } else {
         missedBreaks++;
+        this.logger.debug(
+          `Break compliance: Scheduled break ${scheduled.start}-${scheduled.end} NOT matched`,
+        );
       }
     }
 
@@ -360,6 +377,10 @@ export class AdherenceCalculationService {
       scheduledBreaks.length > 0
         ? (matchedBreaks / scheduledBreaks.length) * 100
         : 100; // No scheduled breaks = 100% compliance
+
+    this.logger.debug(
+      `Break compliance: ${matchedBreaks} matched, ${missedBreaks} missed, ${extendedBreaks} extended out of ${scheduledBreaks.length} scheduled breaks = ${compliancePercentage.toFixed(2)}%`,
+    );
 
     return {
       percentage: Math.round(compliancePercentage * 100) / 100, // Round to 2 decimals
