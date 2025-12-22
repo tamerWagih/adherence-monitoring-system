@@ -15,12 +15,16 @@ import { User } from '../entities/user.entity';
 import { EventsController } from './controllers/events.controller';
 import { WorkstationConfigController } from './controllers/workstation-config.controller';
 import { AgentStatusController } from './controllers/agent-status.controller';
+import { SummariesController } from './controllers/summaries.controller';
 import { EventIngestionService } from './services/event-ingestion.service';
 import { WorkstationConfigService } from './services/workstation-config.service';
 import { WorkstationAuthService } from './services/workstation-auth.service';
 import { AgentStatusService } from './services/agent-status.service';
+import { AdherenceCalculationService } from './services/adherence-calculation.service';
 import { EventIngestionQueue } from './queues/event-ingestion.queue';
 import { EventIngestionProcessor } from './queues/event-ingestion.processor';
+import { AdherenceCalculationScheduler } from './schedulers/adherence-calculation.scheduler';
+import { PartitionManagementScheduler } from './schedulers/partition-management.scheduler';
 
 /**
  * AdherenceModule
@@ -28,12 +32,13 @@ import { EventIngestionProcessor } from './queues/event-ingestion.processor';
  * Handles:
  * - Event ingestion from Desktop Agents
  * - Workstation configuration
- * - Adherence calculation (to be implemented)
- * - Adherence summaries (to be implemented)
+ * - Adherence calculation ✅
+ * - Adherence summaries ✅
+ * - Scheduled jobs (daily calculation, partition management) ✅
  * 
  * Note: Rate limiting is configured globally in AppModule.
- * Per-workstation rate limiting (10 req/min) will be implemented
- * in Week 5 using custom throttler storage or guard.
+ * Per-workstation rate limiting (10 req/min) is implemented
+ * using WorkstationRateLimitGuard with Redis-based storage.
  */
 @Module({
   imports: [
@@ -55,14 +60,22 @@ import { EventIngestionProcessor } from './queues/event-ingestion.processor';
       User, // For exception relationships
     ]),
   ],
-  controllers: [EventsController, WorkstationConfigController, AgentStatusController],
+  controllers: [
+    EventsController,
+    WorkstationConfigController,
+    AgentStatusController,
+    SummariesController,
+  ],
   providers: [
     EventIngestionService,
     WorkstationConfigService,
     WorkstationAuthService,
     AgentStatusService,
+    AdherenceCalculationService,
     EventIngestionQueue,
     EventIngestionProcessor,
+    AdherenceCalculationScheduler,
+    PartitionManagementScheduler,
   ],
   exports: [WorkstationAuthService, EventIngestionQueue], // Export for use in guards and health monitoring
 })
