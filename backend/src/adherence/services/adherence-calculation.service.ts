@@ -392,11 +392,14 @@ export class AdherenceCalculationService {
   }
 
   /**
-   * Parse time string to Date object in Egypt timezone
+   * Parse time string to Date object
+   * 
+   * Note: Schedule times (shift_start/shift_end) are stored as TIME without timezone.
+   * We interpret them as UTC to match how events are stored (UTC timestamps).
    */
   private parseTimeToDate(date: Date, timeStr: string): Date {
     const dateStr = date.toISOString().split('T')[0];
-    return new Date(`${dateStr}T${timeStr}${this.EGYPT_TIMEZONE}`);
+    return new Date(`${dateStr}T${timeStr}Z`); // Interpret as UTC
   }
 
   /**
