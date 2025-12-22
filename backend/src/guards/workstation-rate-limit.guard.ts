@@ -41,24 +41,37 @@ export class WorkstationRateLimitGuard implements CanActivate {
     const key = `workstation:rate-limit:${workstationId}`;
 
     try {
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Redis operation timeout')), 2000);
+      // Check if Redis is connected
+      if (this.redis.status !== 'ready' && this.redis.status !== 'connecting') {
+        // Redis not connected - fail open (allow request)
+        return true;
+      }
+
+      // Add timeout to prevent hanging (1 second timeout for rate limit check)
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Redis operation timeout')), 1000);
       });
 
       // Get current count with timeout
       const count = await Promise.race([
         this.redis.get(key),
         timeoutPromise,
-      ]) as string | null;
-      const currentCount = count ? parseInt(count, 10) : 0;
+      ]).catch(() => null) as string | null;
+      
+      // If timeout or error, fail open
+      if (count === null) {
+        return true;
+      }
+
+      const currentCount = parseInt(count, 10) || 0;
 
       if (currentCount >= this.limit) {
         // Rate limit exceeded - get remaining TTL with timeout
         const remainingTtl = await Promise.race([
           this.redis.ttl(key),
           timeoutPromise,
-        ]) as number;
+        ]).catch(() => this.ttl) as number;
+        
         const retryAfter = remainingTtl > 0 ? remainingTtl : this.ttl;
 
         // Set Retry-After header
@@ -74,14 +87,14 @@ export class WorkstationRateLimitGuard implements CanActivate {
         );
       }
 
-      // Increment counter and set TTL with timeout
+      // Increment counter and set TTL with timeout (fire and forget - don't wait)
       const pipeline = this.redis.pipeline();
       pipeline.incr(key);
       pipeline.expire(key, this.ttl);
-      await Promise.race([
-        pipeline.exec(),
-        timeoutPromise,
-      ]);
+      // Don't await - fire and forget to avoid blocking
+      pipeline.exec().catch(() => {
+        // Ignore errors - rate limiting is best effort
+      });
 
       return true;
     } catch (error) {
@@ -90,7 +103,6 @@ export class WorkstationRateLimitGuard implements CanActivate {
         throw error;
       }
 
-      console.error('Redis rate limit error:', error);
       // Fail open - allow request if Redis is unavailable or timeout
       return true;
     }

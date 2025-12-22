@@ -70,15 +70,20 @@ import Redis from 'ioredis';
         // Common options for all connections
         const commonOptions = {
           retryStrategy: (times: number) => {
+            // Stop retrying after 3 attempts (return null)
+            if (times > 3) {
+              return null; // Stop retrying
+            }
             const delay = Math.min(times * 50, 2000);
             return delay;
           },
-          maxRetriesPerRequest: 3,
-          enableReadyCheck: true,
-          lazyConnect: true,
+          maxRetriesPerRequest: 1, // Retry once if command fails
+          enableReadyCheck: false, // Disable ready check to avoid blocking
+          lazyConnect: false, // Connect immediately (not lazy)
           connectTimeout: 5000, // 5 second connection timeout
-          commandTimeout: 5000, // 5 second command timeout
-          enableOfflineQueue: false, // Don't queue commands if disconnected
+          commandTimeout: 3000, // 3 second command timeout
+          enableOfflineQueue: true, // Queue commands when disconnected
+          maxRetriesPerRequest: 1, // Retry once if command fails
         };
 
         const client = typeof connectionOptions === 'string'
@@ -86,11 +91,23 @@ import Redis from 'ioredis';
           : new Redis({ ...connectionOptions, ...commonOptions });
 
         client.on('error', (err) => {
-          console.error('Redis Client Error:', err);
+          console.error('Redis Client Error:', err.message);
         });
 
         client.on('connect', () => {
-          console.log('Redis Client Connected');
+          console.log(`Redis Client Connected to ${redisHost}:${redisPort}`);
+        });
+
+        client.on('ready', () => {
+          console.log('Redis Client Ready');
+        });
+
+        client.on('close', () => {
+          console.warn('Redis Client Connection Closed');
+        });
+
+        client.on('reconnecting', () => {
+          console.log('Redis Client Reconnecting...');
         });
 
         return client;

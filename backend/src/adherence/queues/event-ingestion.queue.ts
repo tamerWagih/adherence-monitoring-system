@@ -43,7 +43,7 @@ export class EventIngestionQueue {
     try {
       // Add timeout to prevent hanging if Redis is unavailable
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Queue operation timeout')), 5000);
+        setTimeout(() => reject(new Error('Queue operation timeout')), 3000);
       });
 
       const job = await Promise.race([
@@ -75,7 +75,7 @@ export class EventIngestionQueue {
       return job.id!;
     } catch (error) {
       this.logger.error(`Failed to queue event: ${error.message}`);
-      // Re-throw to let controller handle (will return 500 error)
+      // Re-throw to let controller handle (will return 503 error)
       throw error;
     }
   }
@@ -101,7 +101,7 @@ export class EventIngestionQueue {
     try {
       // Add timeout to prevent hanging if Redis is unavailable
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Queue operation timeout')), 5000);
+        setTimeout(() => reject(new Error('Queue operation timeout')), 3000);
       });
 
       // Queue entire batch as a single job for better performance
