@@ -210,6 +210,9 @@ export class AdherenceCalculationService {
 
   /**
    * Calculate start variance in minutes
+   * 
+   * Note: Schedule times (shiftStart/shiftEnd) are stored as TIME without timezone.
+   * We interpret them as UTC to match how events are stored (UTC timestamps).
    */
   private calculateStartVariance(
     actualStart: Date | null,
@@ -223,10 +226,9 @@ export class AdherenceCalculationService {
     // Parse scheduled start time (format: "HH:mm:ss" or "HH:mm")
     const [hours, minutes] = schedule.shiftStart.split(':').map(Number);
     
-    // Use the scheduleDate parameter to build scheduled time in Egypt timezone
+    // Build scheduled time as UTC (schedule times are stored as UTC)
     const scheduleDateStr = scheduleDate.toISOString().split('T')[0];
-    const scheduleDateTime = new Date(`${scheduleDateStr}T${schedule.shiftStart}${this.EGYPT_TIMEZONE}`);
-    const scheduleUTC = new Date(scheduleDateTime.toISOString());
+    const scheduleUTC = new Date(`${scheduleDateStr}T${schedule.shiftStart}Z`);
 
     // Calculate difference in minutes
     const diffMs = actualStart.getTime() - scheduleUTC.getTime();
@@ -235,6 +237,9 @@ export class AdherenceCalculationService {
 
   /**
    * Calculate end variance in minutes
+   * 
+   * Note: Schedule times (shiftStart/shiftEnd) are stored as TIME without timezone.
+   * We interpret them as UTC to match how events are stored (UTC timestamps).
    */
   private calculateEndVariance(
     actualEnd: Date | null,
@@ -248,10 +253,9 @@ export class AdherenceCalculationService {
     // Parse scheduled end time (format: "HH:mm:ss" or "HH:mm")
     const [hours, minutes] = schedule.shiftEnd.split(':').map(Number);
     
-    // Use the scheduleDate parameter to build scheduled time in Egypt timezone
+    // Build scheduled time as UTC (schedule times are stored as UTC)
     const scheduleDateStr = scheduleDate.toISOString().split('T')[0];
-    const scheduleDateTime = new Date(`${scheduleDateStr}T${schedule.shiftEnd}${this.EGYPT_TIMEZONE}`);
-    const scheduleUTC = new Date(scheduleDateTime.toISOString());
+    const scheduleUTC = new Date(`${scheduleDateStr}T${schedule.shiftEnd}Z`);
 
     // Calculate difference in minutes
     const diffMs = actualEnd.getTime() - scheduleUTC.getTime();
