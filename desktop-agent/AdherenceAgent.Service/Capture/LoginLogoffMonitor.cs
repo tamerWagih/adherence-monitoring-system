@@ -18,20 +18,21 @@ public class LoginLogoffMonitor
     private EventLogWatcher? _logonWatcher;
     private EventLogWatcher? _logoffWatcher;
     private readonly Dictionary<string, DateTime> _recentLogins; // Track recent logins to prevent duplicates
+    private readonly Dictionary<string, DateTime> _recentLogoffs; // Track recent logoffs to prevent duplicates
     private readonly TimeSpan _duplicateWindow = TimeSpan.FromSeconds(5); // 5-second window for duplicate detection
 
     // Security Event IDs
     private const int LogonEventId = 4624;
     private const int LogoffEventId = 4634;
     private const int UserInitiatedLogoffEventId = 4647;
-    private const int LockEventId = 4800;
-    private const int UnlockEventId = 4801;
+    // NOTE: Lock/unlock (4800/4801) is handled by the tray app in the interactive session.
 
     public LoginLogoffMonitor(ILogger<LoginLogoffMonitor> logger, IEventBuffer buffer)
     {
         _logger = logger;
         _buffer = buffer;
         _recentLogins = new Dictionary<string, DateTime>();
+        _recentLogoffs = new Dictionary<string, DateTime>();
     }
 
     public void Start(CancellationToken token)
@@ -41,7 +42,7 @@ public class LoginLogoffMonitor
             var logonQuery = new EventLogQuery(
                 "Security",
                 PathType.LogName,
-                $"*[System[(EventID={LogonEventId} or EventID={UnlockEventId})]]");
+                $"*[System[(EventID={LogonEventId})]]");
             _logonWatcher = new EventLogWatcher(logonQuery);
             _logonWatcher.EventRecordWritten += async (_, e) => await HandleEventAsync(e.EventRecord, EventTypes.Login, token);
             _logonWatcher.Enabled = true;
@@ -49,7 +50,7 @@ public class LoginLogoffMonitor
             var logoffQuery = new EventLogQuery(
                 "Security",
                 PathType.LogName,
-                $"*[System[(EventID={LogoffEventId} or EventID={UserInitiatedLogoffEventId} or EventID={LockEventId})]]");
+                $"*[System[(EventID={LogoffEventId} or EventID={UserInitiatedLogoffEventId})]]");
             _logoffWatcher = new EventLogWatcher(logoffQuery);
             _logoffWatcher.EventRecordWritten += async (_, e) => await HandleEventAsync(e.EventRecord, EventTypes.Logoff, token);
             _logoffWatcher.Enabled = true;
@@ -75,6 +76,23 @@ public class LoginLogoffMonitor
 
         try
         {
+            // Since tray owns lock/unlock, service should only emit "real" interactive logon/logoff.
+            // For 4624/4634/4647, filter by LogonType allowlist:
+            //  - 2  = Interactive (console)
+            //  - 10 = RemoteInteractive (RDP)
+            //  - 11 = CachedInteractive
+            // This removes lock/unlock noise (typically LogonType=7) and other non-user sessions.
+            if (record.Id == LogonEventId || record.Id == LogoffEventId || record.Id == UserInitiatedLogoffEventId)
+            {
+                var logonType = (ExtractEventDataValue(record, "LogonType") ?? string.Empty).Trim();
+                if (!IsAllowedInteractiveLogonType(logonType))
+                {
+                    _logger.LogDebug("Ignoring Security event {EventId} LogonType={LogonType} (not interactive)",
+                        record.Id, logonType);
+                    return;
+                }
+            }
+
             // Extract NT account from Security Event Log
             var ntAccount = ExtractNtAccountFromEvent(record);
             
@@ -107,7 +125,9 @@ public class LoginLogoffMonitor
             if (eventType == EventTypes.Login)
             {
                 var eventTime = record.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow;
-                var dedupKey = $"{ntAccount}_{record.Id}_{eventTime:yyyyMMddHHmmss}";
+                var recordId = record.RecordId?.ToString() ?? string.Empty;
+                var logonId = (ExtractEventDataValue(record, "TargetLogonId") ?? string.Empty).Trim();
+                var dedupKey = $"{eventType}_{ntAccount}_{record.Id}_{recordId}_{logonId}_{eventTime:yyyyMMddHHmmss}";
                 
                 // Clean up old entries
                 var cutoff = DateTime.UtcNow - _duplicateWindow;
@@ -127,6 +147,35 @@ public class LoginLogoffMonitor
                 
                 _recentLogins[dedupKey] = eventTime;
             }
+            else if (eventType == EventTypes.Logoff)
+            {
+                // Deduplicate LOGOFF events too (4634/4647 can also fire multiple times).
+                var eventTime = record.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow;
+                var recordId = record.RecordId?.ToString() ?? string.Empty;
+                var logonId = (ExtractEventDataValue(record, "TargetLogonId") ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(logonId))
+                {
+                    // Some logoff events use SubjectLogonId
+                    logonId = (ExtractEventDataValue(record, "SubjectLogonId") ?? string.Empty).Trim();
+                }
+                var dedupKey = $"{eventType}_{ntAccount}_{record.Id}_{recordId}_{logonId}_{eventTime:yyyyMMddHHmmss}";
+
+                var cutoff = DateTime.UtcNow - _duplicateWindow;
+                var keysToRemove = _recentLogoffs.Where(kvp => kvp.Value < cutoff).Select(kvp => kvp.Key).ToList();
+                foreach (var key in keysToRemove)
+                {
+                    _recentLogoffs.Remove(key);
+                }
+
+                if (_recentLogoffs.ContainsKey(dedupKey))
+                {
+                    _logger.LogDebug("Skipping duplicate LOGOFF event: {NtAccount}, EventID: {EventId}, Time: {Time}",
+                        ntAccount, record.Id, eventTime);
+                    return;
+                }
+
+                _recentLogoffs[dedupKey] = eventTime;
+            }
 
             var eventTimeUtc = record.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow;
             await _buffer.AddAsync(new AdherenceEvent
@@ -145,6 +194,40 @@ public class LoginLogoffMonitor
         {
             _logger.LogWarning(ex, "Failed to buffer {EventType} event from Security log", eventType);
         }
+    }
+
+    /// <summary>
+    /// Reads a value from the event XML's EventData Data[@Name='...'] node.
+    /// Returns empty string if missing/unparseable.
+    /// </summary>
+    private string ExtractEventDataValue(EventRecord record, string name)
+    {
+        try
+        {
+            var xml = record.ToXml();
+            if (string.IsNullOrEmpty(xml))
+            {
+                return string.Empty;
+            }
+
+            var doc = new XmlDocument();
+            doc.LoadXml(xml);
+            var nsManager = new XmlNamespaceManager(doc.NameTable);
+            nsManager.AddNamespace("ns", "http://schemas.microsoft.com/win/2004/08/events/event");
+
+            var node = doc.SelectSingleNode($"//ns:EventData/ns:Data[@Name='{name}']", nsManager);
+            return node?.InnerText ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool IsAllowedInteractiveLogonType(string logonType)
+    {
+        // Allow only the interactive types we consider "real user sessions".
+        return logonType == "2" || logonType == "10" || logonType == "11";
     }
 
     /// <summary>

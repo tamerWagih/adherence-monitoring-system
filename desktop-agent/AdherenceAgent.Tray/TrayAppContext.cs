@@ -38,6 +38,12 @@ public class TrayAppContext : ApplicationContext
     private TrayInteractiveCapture? _interactiveCapture;
     private SQLiteEventBuffer? _trayBuffer;
 
+    // Tray-owned session monitors (interactive-session truth)
+    private TrayIdleMonitor? _trayIdleMonitor;
+    private TraySessionSwitchMonitor? _traySessionSwitchMonitor;
+    private TrayBreakAlertMonitor? _trayBreakAlertMonitor;
+    private TrayBreakDetector? _trayBreakDetector;
+
     public TrayAppContext()
     {
         _iconGreen = CreateCircleIcon(Color.LimeGreen);
@@ -81,6 +87,18 @@ public class TrayAppContext : ApplicationContext
 
             _interactiveCapture = new TrayInteractiveCapture(_config, _trayBuffer, _classificationCache, _clientWebsiteCache, _callingAppCache);
             _interactiveCapture.Start();
+
+            // Tray owns: idle + lock/unlock + break alerts (and break detection which depends on idle).
+            _trayBreakDetector = new TrayBreakDetector(NullLogger<TrayBreakDetector>.Instance, _trayBuffer, _breakScheduleCache);
+
+            _trayIdleMonitor = new TrayIdleMonitor(NullLogger<TrayIdleMonitor>.Instance, _trayBuffer, _config, _trayBreakDetector);
+            _trayIdleMonitor.Start(CancellationToken.None);
+
+            _traySessionSwitchMonitor = new TraySessionSwitchMonitor(NullLogger<TraySessionSwitchMonitor>.Instance, _trayBuffer);
+            _traySessionSwitchMonitor.Start();
+
+            _trayBreakAlertMonitor = new TrayBreakAlertMonitor(NullLogger<TrayBreakAlertMonitor>.Instance, _trayBuffer, _breakScheduleCache);
+            _trayBreakAlertMonitor.Start(CancellationToken.None);
         }
         catch (Exception)
         {
@@ -298,11 +316,24 @@ public class TrayAppContext : ApplicationContext
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.TryGetProperty("Agent", out var agent))
                 {
-                    _config.ApiEndpoint = agent.GetProperty("ApiEndpoint").GetString() ?? _config.ApiEndpoint;
-                    _config.BatchSize = agent.GetProperty("BatchSize").GetInt32();
-                    _config.SyncIntervalSeconds = agent.GetProperty("SyncIntervalSeconds").GetInt32();
-                    _config.MaxBufferSize = agent.GetProperty("MaxBufferSize").GetInt32();
-                    _config.MaxRetryAttempts = agent.GetProperty("MaxRetryAttempts").GetInt32();
+                    if (agent.TryGetProperty("ApiEndpoint", out var api) && api.ValueKind == JsonValueKind.String)
+                        _config.ApiEndpoint = api.GetString() ?? _config.ApiEndpoint;
+                    if (agent.TryGetProperty("BatchSize", out var batch) && batch.TryGetInt32(out var batchSize))
+                        _config.BatchSize = batchSize;
+                    if (agent.TryGetProperty("SyncIntervalSeconds", out var sync) && sync.TryGetInt32(out var syncSeconds))
+                        _config.SyncIntervalSeconds = syncSeconds;
+                    if (agent.TryGetProperty("MaxBufferSize", out var maxBuf) && maxBuf.TryGetInt32(out var maxBufferSize))
+                        _config.MaxBufferSize = maxBufferSize;
+                    if (agent.TryGetProperty("MaxRetryAttempts", out var maxRetry) && maxRetry.TryGetInt32(out var maxRetryAttempts))
+                        _config.MaxRetryAttempts = maxRetryAttempts;
+
+                    // Idle configuration is tray-owned; keep in sync with service/appsettings.
+                    if (agent.TryGetProperty("IdleThresholdMinutes", out var idleMin) && idleMin.TryGetInt32(out var idleThresholdMinutes))
+                        _config.IdleThresholdMinutes = idleThresholdMinutes;
+                    if (agent.TryGetProperty("IdleThresholdSeconds", out var idleSec) && idleSec.TryGetInt32(out var idleThresholdSeconds))
+                        _config.IdleThresholdSeconds = idleThresholdSeconds;
+                    if (agent.TryGetProperty("IdleCheckIntervalSeconds", out var idlePoll) && idlePoll.TryGetInt32(out var idleCheckIntervalSeconds))
+                        _config.IdleCheckIntervalSeconds = idleCheckIntervalSeconds;
                 }
             }
         }
@@ -318,11 +349,23 @@ public class TrayAppContext : ApplicationContext
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.TryGetProperty("Agent", out var agent))
                 {
-                    _config.ApiEndpoint = agent.GetProperty("ApiEndpoint").GetString() ?? _config.ApiEndpoint;
-                    _config.BatchSize = agent.GetProperty("BatchSize").GetInt32();
-                    _config.SyncIntervalSeconds = agent.GetProperty("SyncIntervalSeconds").GetInt32();
-                    _config.MaxBufferSize = agent.GetProperty("MaxBufferSize").GetInt32();
-                    _config.MaxRetryAttempts = agent.GetProperty("MaxRetryAttempts").GetInt32();
+                    if (agent.TryGetProperty("ApiEndpoint", out var api) && api.ValueKind == JsonValueKind.String)
+                        _config.ApiEndpoint = api.GetString() ?? _config.ApiEndpoint;
+                    if (agent.TryGetProperty("BatchSize", out var batch) && batch.TryGetInt32(out var batchSize))
+                        _config.BatchSize = batchSize;
+                    if (agent.TryGetProperty("SyncIntervalSeconds", out var sync) && sync.TryGetInt32(out var syncSeconds))
+                        _config.SyncIntervalSeconds = syncSeconds;
+                    if (agent.TryGetProperty("MaxBufferSize", out var maxBuf) && maxBuf.TryGetInt32(out var maxBufferSize))
+                        _config.MaxBufferSize = maxBufferSize;
+                    if (agent.TryGetProperty("MaxRetryAttempts", out var maxRetry) && maxRetry.TryGetInt32(out var maxRetryAttempts))
+                        _config.MaxRetryAttempts = maxRetryAttempts;
+
+                    if (agent.TryGetProperty("IdleThresholdMinutes", out var idleMin) && idleMin.TryGetInt32(out var idleThresholdMinutes))
+                        _config.IdleThresholdMinutes = idleThresholdMinutes;
+                    if (agent.TryGetProperty("IdleThresholdSeconds", out var idleSec) && idleSec.TryGetInt32(out var idleThresholdSeconds))
+                        _config.IdleThresholdSeconds = idleThresholdSeconds;
+                    if (agent.TryGetProperty("IdleCheckIntervalSeconds", out var idlePoll) && idlePoll.TryGetInt32(out var idleCheckIntervalSeconds))
+                        _config.IdleCheckIntervalSeconds = idleCheckIntervalSeconds;
                 }
             }
         }
@@ -488,6 +531,9 @@ public class TrayAppContext : ApplicationContext
         _statusTimer?.Stop();
         _breakNotificationTimer?.Stop();
         _menuRefreshTimer?.Stop();
+        try { _trayIdleMonitor?.Stop(); } catch { }
+        try { _traySessionSwitchMonitor?.Stop(); } catch { }
+        try { _trayBreakAlertMonitor?.Stop(); } catch { }
         try { _interactiveCapture?.Dispose(); } catch { }
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();

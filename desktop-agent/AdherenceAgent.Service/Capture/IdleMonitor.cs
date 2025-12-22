@@ -21,6 +21,8 @@ public class IdleMonitor
     private bool _isIdle;
     private DateTime? _idleStartUtc;
     private DateTime? _lastKnownActiveTime;
+    private TimeSpan? _lastIdleTimeSample;
+    private int _idleCandidateHits;
 
     public IdleMonitor(
         ILogger<IdleMonitor> logger,
@@ -70,28 +72,19 @@ public class IdleMonitor
 
             if (!_isIdle && idleTime >= _idleThreshold)
             {
-                // Additional validation: If we have recent activity tracking, double-check before marking as idle
-                // This helps prevent false positives from stale WTS data
-                bool shouldMarkAsIdle = true;
-                if (_lastKnownActiveTime.HasValue)
+                // Safety: Require two consecutive "idle >= threshold" samples before emitting IDLE_START.
+                // This protects against transient/garbage WTS samples (especially right after service start / session changes).
+                // It adds at most one poll interval of delay to idle detection.
+                _idleCandidateHits = Math.Min(_idleCandidateHits + 1, 10);
+                if (_idleCandidateHits < 2)
                 {
-                    var timeSinceLastKnownActive = DateTime.UtcNow - _lastKnownActiveTime.Value;
-                    // If user was active within the last minute, don't mark as idle (WTS data might be stale)
-                    if (timeSinceLastKnownActive < TimeSpan.FromMinutes(1))
-                    {
-                        _logger.LogWarning("WTS reports idle {WtsIdleSeconds}s, but user was active {RecentSeconds}s ago - ignoring idle detection (likely stale WTS data)", 
-                            idleTime.TotalSeconds, timeSinceLastKnownActive.TotalSeconds);
-                        // Reset idleTime to the more recent activity time
-                        idleTime = timeSinceLastKnownActive;
-                        _lastKnownActiveTime = DateTime.UtcNow;
-                        // Don't create IDLE_START event - user is actually active
-                        shouldMarkAsIdle = false;
-                    }
+                    _logger.LogDebug("Idle candidate detected (hit {Hit}/2): idle={IdleSeconds}s, threshold={ThresholdSeconds}s",
+                        _idleCandidateHits, idleTime.TotalSeconds, _idleThreshold.TotalSeconds);
+                    _lastIdleTimeSample = idleTime;
+                    return;
                 }
-                
-                if (shouldMarkAsIdle)
-                {
-                    _isIdle = true;
+
+                _isIdle = true;
                 // Set idle start to now (when threshold was crossed), not (now - idleTime)
                 // idleTime can be cumulative from previous sessions if not properly reset,
                 // so using it to calculate start time would be incorrect
@@ -122,11 +115,11 @@ public class IdleMonitor
                             _idleStartUtc, totalIdleMinutes);
                         await _breakDetector.CheckBreakStatusAsync(true, _idleStartUtc, totalIdleMinutes);
                     }
-                }
             }
             else if (_isIdle && idleTime < _idleThreshold)
             {
                 _isIdle = false;
+                _idleCandidateHits = 0;
                 
                 // Only create IDLE_END if we have a valid idle start time
                 // This prevents orphaned IDLE_END events (e.g., after service restart or if IDLE_START creation failed)
@@ -168,7 +161,9 @@ public class IdleMonitor
                 }
                 
                 _idleStartUtc = null;
-                _lastKnownActiveTime = DateTime.UtcNow; // Update last known active time
+                // We observed the user become active again (idle time dropped below threshold).
+                // Keep a conservative "last known active" timestamp for fallback paths.
+                _lastKnownActiveTime = DateTime.UtcNow;
             }
             else if (_isIdle && _breakDetector != null)
             {
@@ -182,19 +177,12 @@ public class IdleMonitor
                 // This ensures break windows are detected even if user is active when window starts
                 await _breakDetector.CheckBreakStatusAsync(false, null, 0);
             }
-            
-            // Update last known active time if user is active
-            // Also update if idleTime is less than threshold (even if _isIdle is true, user might have become active)
-            if (idleTime < _idleThreshold)
+
+            _lastIdleTimeSample = idleTime;
+            if (!_isIdle && idleTime < _idleThreshold)
             {
-                _lastKnownActiveTime = DateTime.UtcNow;
-            }
-            // Also update if we're not idle (regardless of idleTime) - this handles edge cases
-            else if (!_isIdle)
-            {
-                // If we're not idle but idleTime suggests we should be, update last known active time
-                // This helps recover from stale WTS data
-                _lastKnownActiveTime = DateTime.UtcNow;
+                // reset idle candidate when the user is clearly active
+                _idleCandidateHits = 0;
             }
         }
         catch (Exception ex)
@@ -256,7 +244,7 @@ public class IdleMonitor
         try
         {
             var sessionId = WTSGetActiveConsoleSessionId();
-            if (sessionId == 0xFFFFFFFF || sessionId == 0)
+            if (sessionId == 0xFFFFFFFF)
             {
                 return null; // No active console session
             }
@@ -282,20 +270,24 @@ public class IdleMonitor
                 // Convert to DateTime and calculate idle time
                 if (wtsInfo.LastInputTime > 0 && wtsInfo.CurrentTime > 0)
                 {
-                    var lastInput = DateTime.FromFileTime(wtsInfo.LastInputTime);
-                    var currentTime = DateTime.FromFileTime(wtsInfo.CurrentTime);
-                    var idleTime = currentTime - lastInput;
-                    
-                    // Validate: LastInputTime should not be in the future
-                    if (lastInput > currentTime)
+                    // FILETIME units are 100ns (same as TimeSpan ticks). Use raw math to avoid timezone/DateTimeKind pitfalls.
+                    var idleFileTimeTicks = wtsInfo.CurrentTime - wtsInfo.LastInputTime;
+
+                    // Validate: LastInputTime should not be in the future (negative idle)
+                    if (idleFileTimeTicks < 0)
                     {
-                        _logger.LogWarning("WTS LastInputTime is in the future (LastInput: {LastInput}, Current: {Current}), using last known active time", lastInput, currentTime);
+                        var lastInputUtc = DateTime.FromFileTimeUtc(wtsInfo.LastInputTime);
+                        var currentUtc = DateTime.FromFileTimeUtc(wtsInfo.CurrentTime);
+                        _logger.LogWarning("WTS LastInputTime is in the future (LastInput: {LastInput}, Current: {Current}), using last known active time",
+                            lastInputUtc, currentUtc);
                         if (_lastKnownActiveTime.HasValue)
                         {
                             return DateTime.UtcNow - _lastKnownActiveTime.Value;
                         }
                         return TimeSpan.Zero;
                     }
+
+                    var idleTime = TimeSpan.FromTicks(idleFileTimeTicks);
                     
                     // If LastInputTime is suspiciously old (> 1 day), it's likely stale
                     // Use last known active time instead
@@ -308,21 +300,10 @@ public class IdleMonitor
                         }
                         return TimeSpan.Zero;
                     }
-                    
-                    // Validate: If we have a recent _lastKnownActiveTime and WTS shows idle time > threshold,
-                    // but _lastKnownActiveTime suggests user was active more recently, trust _lastKnownActiveTime
-                    // This handles cases where WTS data is stale but we've seen activity
-                    if (_lastKnownActiveTime.HasValue && idleTime >= _idleThreshold)
-                    {
-                        var timeSinceLastKnownActive = DateTime.UtcNow - _lastKnownActiveTime.Value;
-                        // If user was active more recently than WTS suggests, use the more recent time
-                        if (timeSinceLastKnownActive < idleTime - TimeSpan.FromSeconds(30))
-                        {
-                            _logger.LogDebug("WTS shows idle {WtsIdleSeconds}s, but user was active {RecentSeconds}s ago - using recent activity time", 
-                                idleTime.TotalSeconds, timeSinceLastKnownActive.TotalSeconds);
-                            return timeSinceLastKnownActive;
-                        }
-                    }
+
+                    // Track last known activity as the last input time implied by this idle measurement.
+                    // This is used only for fallback paths when WTS/GetLastInputInfo returns unusable values.
+                    _lastKnownActiveTime = DateTime.UtcNow - idleTime;
                     
                     return idleTime;
                 }
@@ -344,11 +325,13 @@ public class IdleMonitor
     }
 
     // --- WTS API declarations ---
-    private const int WTS_CURRENT_SERVER_HANDLE = 0;
-    
     private enum WTS_INFO_CLASS
     {
-        WTSSessionInfo = 0
+        // IMPORTANT:
+        // These values must match the Windows SDK `WTS_INFO_CLASS` enum.
+        // A wrong value can still return success but the buffer will contain a different structure (or a string),
+        // and marshalling it as `WTSINFO` yields garbage timestamps (e.g. 1601 dates / huge idle while user is active).
+        WTSSessionInfo = 24
     }
 
     [DllImport("kernel32.dll")]

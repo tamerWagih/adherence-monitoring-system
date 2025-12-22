@@ -51,23 +51,18 @@ public class EventCaptureService : BackgroundService
             throw;
         }
 
-        _loginMonitor.Start(stoppingToken);
-        _idleMonitor.Start(stoppingToken);
-        _sessionSwitchMonitor.Start(stoppingToken);
         _processMonitor.Start(stoppingToken);
-        _breakAlertMonitor.Start(stoppingToken);
-        
-        _logger.LogInformation("Service monitors started: LoginLogoff, Idle, SessionSwitch, ProcessMonitor, BreakAlertMonitor. Interactive capture is handled by the tray app.");
+
+        // NOTE: Idle, lock/unlock, and break alerts are owned by the tray app (interactive session),
+        // to avoid Session 0 / WTS inconsistencies and duplicated events.
+        // NOTE: Login/Logoff is also owned by the tray app via session switch events to avoid duplicates.
+        _logger.LogInformation("Service monitors started: ProcessMonitor. Idle/login-logoff/lock-unlock/break alerts are handled by the tray app.");
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Stopping event capture service.");
-        _loginMonitor.Stop();
-        _idleMonitor.Stop();
-        _sessionSwitchMonitor.Stop();
         _processMonitor.Stop();
-        _breakAlertMonitor.Stop();
         
         return base.StopAsync(cancellationToken);
     }
