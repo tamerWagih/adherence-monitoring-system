@@ -55,6 +55,9 @@
 
       <!-- Per-machine Start Menu hierarchy (Startup is under ProgramData\...\Start Menu\Programs\Startup) -->
       <Directory Id="CommonProgramMenuFolder">
+        <Directory Id="VendorProgramMenuFolder" Name="Octopus WFM">
+          <Directory Id="AppProgramMenuFolder" Name="Adherence Monitoring Agent" />
+        </Directory>
         <Directory Id="CommonStartupFolder" Name="Startup" />
       </Directory>
     </Directory>
@@ -64,9 +67,11 @@
       <ComponentGroupRef Id="ServiceComponents" />
       <ComponentGroupRef Id="TrayComponents" />
       <ComponentGroupRef Id="TrayStartupComponents" />
+      <ComponentGroupRef Id="StartMenuComponents" />
       <ComponentGroupRef Id="ConfigComponents" />
       <ComponentGroupRef Id="DataFolderComponents" />
       <ComponentGroupRef Id="LogsFolderComponents" />
+      <ComponentGroupRef Id="RootFolderCleanupComponents" />
     </Feature>
 
     <!-- Lock down service control so non-admin users can't stop/start it -->
@@ -76,7 +81,7 @@
                   DllEntry="WixQuietExec"
                   Execute="deferred"
                   Impersonate="no"
-                  Return="check" />
+                  Return="ignore" />
     <CustomAction Id="SetServiceAcl_SetProperty"
                   Property="SetServiceAcl"
                   Value="&quot;[SystemFolder]sc.exe&quot; sdset $(var.ServiceName) &quot;D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;AU)&quot;" />
@@ -113,7 +118,7 @@
                   Return="ignore" />
     <CustomAction Id="DisableServiceRecovery_SetProperty"
                   Property="DisableServiceRecovery"
-                  Value="&quot;[SystemFolder]sc.exe&quot; failure $(var.ServiceName) reset= 0 actions= &quot;&quot;/&quot;&quot;/&quot;&quot; 2&gt;nul" />
+                  Value="&quot;[SystemFolder]sc.exe&quot; failure $(var.ServiceName) reset= 0 actions= &quot;&quot;/&quot;&quot;/&quot;&quot;" />
 
     <CustomAction Id="StopService"
                   BinaryKey="WixCA"
@@ -123,7 +128,7 @@
                   Return="ignore" />
     <CustomAction Id="StopService_SetProperty"
                   Property="StopService"
-                  Value="&quot;[SystemFolder]sc.exe&quot; stop $(var.ServiceName) 2&gt;nul" />
+                  Value="&quot;[SystemFolder]sc.exe&quot; stop $(var.ServiceName)" />
 
     <CustomAction Id="KillService"
                   BinaryKey="WixCA"
@@ -133,7 +138,7 @@
                   Return="ignore" />
     <CustomAction Id="KillService_SetProperty"
                   Property="KillService"
-                  Value="&quot;[SystemFolder]taskkill.exe&quot; /F /T /IM AdherenceAgent.Service.exe 2&gt;nul" />
+                  Value="&quot;[SystemFolder]taskkill.exe&quot; /F /T /IM AdherenceAgent.Service.exe" />
 
     <CustomAction Id="KillTray"
                   BinaryKey="WixCA"
@@ -143,7 +148,18 @@
                   Return="ignore" />
     <CustomAction Id="KillTray_SetProperty"
                   Property="KillTray"
-                  Value="&quot;[SystemFolder]taskkill.exe&quot; /F /T /IM AdherenceAgent.Tray.exe 2&gt;nul" />
+                  Value="&quot;[SystemFolder]taskkill.exe&quot; /F /T /IM AdherenceAgent.Tray.exe" />
+
+    <!-- Start service after install/upgrade (non-fatal). We avoid MSI StartServices failures causing rollback. -->
+    <CustomAction Id="StartService"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <CustomAction Id="StartService_SetProperty"
+                  Property="StartService"
+                  Value="&quot;[SystemFolder]sc.exe&quot; start $(var.ServiceName)" />
 
 
     <!-- Launch tray app after installation (for current user session) -->
@@ -182,6 +198,11 @@
       <Custom Action="SetServiceRecovery" After="SetServiceRecovery_SetProperty"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
       <Custom Action="SetServiceRecoveryFlag_SetProperty" After="InstallServices"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
       <Custom Action="SetServiceRecoveryFlag" After="SetServiceRecoveryFlag_SetProperty"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
+
+      <!-- Non-fatal service start near the end of execute sequence.
+           ICE77: in-script (deferred) CAs must be between InstallInitialize and InstallFinalize. -->
+      <Custom Action="StartService_SetProperty" After="InstallServices"><![CDATA[NOT Installed OR WIX_UPGRADE_DETECTED]]></Custom>
+      <Custom Action="StartService" After="StartService_SetProperty"><![CDATA[NOT Installed OR WIX_UPGRADE_DETECTED]]></Custom>
     </InstallExecuteSequence>
 
     <!-- Launch tray after install only when UI is present -->
@@ -216,7 +237,6 @@
 
         <ServiceControl Id="ServiceControl"
                         Name="$(var.ServiceName)"
-                        Start="install"
                         Remove="uninstall" />
       </Component>
 
@@ -287,6 +307,66 @@
                        KeyPath="yes" />
       </Component>
     </DirectoryRef>
+  </Fragment>
+
+  <!-- Start Menu shortcut (all users) -->
+  <Fragment>
+    <DirectoryRef Id="AppProgramMenuFolder">
+      <Component Id="StartMenuShortcutComponent" Guid="2A4F6D11-8D5E-4F56-9E61-9B9082E6F2C1">
+        <CreateFolder />
+        <Shortcut Id="StartMenuTrayShortcut"
+                  Name="Adherence Agent"
+                  Description="Adherence Monitoring Agent Tray Application"
+                  Target="[INSTALLFOLDER]Tray\AdherenceAgent.Tray.exe"
+                  WorkingDirectory="TrayFolder" />
+        <RemoveFolder Id="RemoveAppProgramMenuFolder" On="uninstall" />
+        <RemoveFolder Id="RemoveVendorProgramMenuFolder" Directory="VendorProgramMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\OctopusWFM\AdherenceAgent"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <ComponentGroup Id="StartMenuComponents">
+      <ComponentRef Id="StartMenuShortcutComponent" />
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Root folder cleanup (remove INSTALLFOLDER/ProgramDataFolder if empty on uninstall) -->
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="InstallRootCleanup" Guid="8B3C2A51-7F66-4C4A-9C45-2F0F9A1A9E33">
+        <CreateFolder />
+        <RemoveFolder Id="RemoveInstallRootFolder" On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\OctopusWFM\AdherenceAgent"
+                       Name="InstallRootCleanup"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="ProgramDataFolder">
+      <Component Id="ProgramDataRootCleanup" Guid="B0C48B1B-2D4E-4F0C-9AA4-0F996B5C7A12">
+        <CreateFolder />
+        <RemoveFolder Id="RemoveProgramDataRootFolder" On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\OctopusWFM\AdherenceAgent"
+                       Name="ProgramDataRootCleanup"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <ComponentGroup Id="RootFolderCleanupComponents">
+      <ComponentRef Id="InstallRootCleanup" />
+      <ComponentRef Id="ProgramDataRootCleanup" />
+    </ComponentGroup>
   </Fragment>
 
   <Fragment>
