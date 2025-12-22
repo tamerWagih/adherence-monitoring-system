@@ -32,7 +32,8 @@
     <!-- Schedule: afterInstallInitialize so we can stop service/tray BEFORE RemoveExistingProducts (prevents rollback/file locks) -->
     <MajorUpgrade 
         DowngradeErrorMessage="A newer version of [ProductName] is already installed."
-        Schedule="afterInstallInitialize" />
+        Schedule="afterInstallInitialize"
+        AllowSameVersionUpgrades="yes" />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Installation directory structure -->
