@@ -562,17 +562,18 @@ export class AdherenceCalculationService {
       }
 
       // Skip IDLE_START/IDLE_END and BREAK_START/BREAK_END (already handled)
+      // Don't update lastEventTime for these - they're excluded periods, not activity events
       if (
         event.eventType === EventType.IDLE_START ||
         event.eventType === EventType.IDLE_END ||
         event.eventType === EventType.BREAK_START ||
         event.eventType === EventType.BREAK_END
       ) {
-        lastEventTime = eventTime;
         continue;
       }
 
       // Calculate time since last event for current app
+      // If we have a current app, count time from lastEventTime to this event
       if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null) {
         // Calculate actual work time in this period (excluding idle/break overlaps)
         let workTimeMs = eventTime.getTime() - lastEventTime.getTime();
@@ -604,6 +605,34 @@ export class AdherenceCalculationService {
             nonWorkAppTimeMinutes += durationMinutes;
           }
         }
+      } else if (lastEventTime && isActivityEvent(event.eventType)) {
+        // First activity event: count time from LOGIN to first activity (excluding idle/break)
+        let workTimeMs = eventTime.getTime() - lastEventTime.getTime();
+        
+        // Subtract idle periods that overlap with this time period
+        for (const idle of idlePeriods) {
+          const overlapStart = Math.max(lastEventTime.getTime(), idle.start.getTime());
+          const overlapEnd = Math.min(eventTime.getTime(), idle.end.getTime());
+          if (overlapStart < overlapEnd) {
+            workTimeMs -= (overlapEnd - overlapStart);
+          }
+        }
+        
+        // Subtract break periods that overlap with this time period
+        for (const breakPeriod of breakPeriods) {
+          const overlapStart = Math.max(lastEventTime.getTime(), breakPeriod.start.getTime());
+          const overlapEnd = Math.min(eventTime.getTime(), breakPeriod.end.getTime());
+          if (overlapStart < overlapEnd) {
+            workTimeMs -= (overlapEnd - overlapStart);
+          }
+        }
+        
+        const durationMinutes = Math.round(workTimeMs / (1000 * 60));
+        
+        if (durationMinutes > 0) {
+          // Default to work application for time from LOGIN to first activity
+          workAppTimeMinutes += durationMinutes;
+        }
       }
 
       // Handle activity events
@@ -618,9 +647,9 @@ export class AdherenceCalculationService {
           // Default to work application if not specified (most activity is work-related)
           currentAppIsWork = event.isWorkApplication !== undefined ? event.isWorkApplication : true;
         }
+        // Update lastEventTime for activity events
+        lastEventTime = eventTime;
       }
-
-      lastEventTime = eventTime;
     }
 
     // Calculate time from last event to end of work period
