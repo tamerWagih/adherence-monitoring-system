@@ -2,7 +2,6 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
-  Index,
 } from 'typeorm';
 
 /**
@@ -19,7 +18,6 @@ import {
  * - employee_personal_info.nt (via employee_id foreign key)
  */
 @Entity('employees')
-@Index('idx_employees_hr_id', { unique: true })
 export class Employee {
   @PrimaryGeneratedColumn('uuid')
   id: string;
