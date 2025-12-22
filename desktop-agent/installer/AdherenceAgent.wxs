@@ -3,7 +3,7 @@
      xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
 
   <?define ProductName = "Adherence Monitoring Agent" ?>
-  <?define ProductVersion = "1.0.15" ?>
+  <?define ProductVersion = "1.0.16" ?>
   <?define ProductCode = "*" ?>
   <?define UpgradeCode = "A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D" ?>
   <?define Manufacturer = "Octopus WFM" ?>
@@ -205,8 +205,11 @@
       <Custom Action="SetServiceRecoveryFlag" After="SetServiceRecoveryFlag_SetProperty"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
 
       <!-- Non-fatal service start near the end of execute sequence.
+           Schedule after StartServices (which runs after InstallServices).
+           For fresh install: NOT Installed is true.
+           For upgrade: WIX_UPGRADE_DETECTED is true.
            ICE77: in-script (deferred) CAs must be between InstallInitialize and InstallFinalize. -->
-      <Custom Action="StartService_SetProperty" After="InstallServices"><![CDATA[NOT Installed OR WIX_UPGRADE_DETECTED]]></Custom>
+      <Custom Action="StartService_SetProperty" Before="InstallFinalize"><![CDATA[NOT Installed OR WIX_UPGRADE_DETECTED]]></Custom>
       <Custom Action="StartService" After="StartService_SetProperty"><![CDATA[NOT Installed OR WIX_UPGRADE_DETECTED]]></Custom>
     </InstallExecuteSequence>
 
