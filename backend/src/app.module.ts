@@ -152,14 +152,16 @@ import { RedisModule } from './common/redis.module';
               port: port ? parseInt(port, 10) : redisPort,
               password: password ? decodeURIComponent(password) : redisPassword,
               connectTimeout: 5000,
-              commandTimeout: 3000,
+              commandTimeout: 10000,
               lazyConnect: false, // Connect immediately
               retryStrategy: (times: number) => {
                 const delay = Math.min(times * 50, 2000);
                 return delay;
               },
-              maxRetriesPerRequest: 1,
+              // BullMQ requires maxRetriesPerRequest to be null (it will override otherwise)
+              maxRetriesPerRequest: null,
               enableOfflineQueue: true,
+              enableReadyCheck: false,
             };
           } else {
             // Fallback: use individual settings
@@ -168,10 +170,12 @@ import { RedisModule } from './common/redis.module';
               port: redisPort,
               password: redisPassword,
               connectTimeout: 5000,
-              commandTimeout: 3000,
+              commandTimeout: 10000,
               lazyConnect: false, // Connect immediately
-              maxRetriesPerRequest: 1,
+              // BullMQ requires maxRetriesPerRequest to be null (it will override otherwise)
+              maxRetriesPerRequest: null,
               enableOfflineQueue: true,
+              enableReadyCheck: false,
             };
           }
         } else {
@@ -179,14 +183,16 @@ import { RedisModule } from './common/redis.module';
           bullmqConnection = {
             ...connection,
             connectTimeout: 5000,
-            commandTimeout: 3000,
+            commandTimeout: 10000,
             lazyConnect: false, // Connect immediately
             retryStrategy: (times: number) => {
               const delay = Math.min(times * 50, 2000);
               return delay;
             },
-            maxRetriesPerRequest: 1,
+            // BullMQ requires maxRetriesPerRequest to be null (it will override otherwise)
+            maxRetriesPerRequest: null,
             enableOfflineQueue: true,
+            enableReadyCheck: false,
           };
         }
 
