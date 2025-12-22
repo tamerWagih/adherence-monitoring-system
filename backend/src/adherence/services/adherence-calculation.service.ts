@@ -86,8 +86,8 @@ export class AdherenceCalculationService {
     const actualEnd = this.findActualEndTime(events, schedule);
 
     // 3. Calculate variances
-    const startVariance = this.calculateStartVariance(actualStart, schedule);
-    const endVariance = this.calculateEndVariance(actualEnd, schedule);
+    const startVariance = this.calculateStartVariance(actualStart, schedule, scheduleDate);
+    const endVariance = this.calculateEndVariance(actualEnd, schedule, scheduleDate);
 
     // 4. Calculate break compliance
     const breakCompliance = await this.calculateBreakCompliance(
@@ -214,6 +214,7 @@ export class AdherenceCalculationService {
   private calculateStartVariance(
     actualStart: Date | null,
     schedule: AgentSchedule,
+    scheduleDate: Date,
   ): number {
     if (!actualStart || !schedule.shiftStart) {
       return 0;
@@ -221,10 +222,8 @@ export class AdherenceCalculationService {
 
     // Parse scheduled start time (format: "HH:mm:ss" or "HH:mm")
     const [hours, minutes] = schedule.shiftStart.split(':').map(Number);
-    const scheduleDate = new Date(actualStart);
-    scheduleDate.setHours(hours, minutes || 0, 0, 0);
-
-    // Convert schedule to Egypt timezone
+    
+    // Use the scheduleDate parameter to build scheduled time in Egypt timezone
     const scheduleDateStr = scheduleDate.toISOString().split('T')[0];
     const scheduleDateTime = new Date(`${scheduleDateStr}T${schedule.shiftStart}${this.EGYPT_TIMEZONE}`);
     const scheduleUTC = new Date(scheduleDateTime.toISOString());
@@ -240,6 +239,7 @@ export class AdherenceCalculationService {
   private calculateEndVariance(
     actualEnd: Date | null,
     schedule: AgentSchedule,
+    scheduleDate: Date,
   ): number {
     if (!actualEnd || !schedule.shiftEnd) {
       return 0;
@@ -247,10 +247,8 @@ export class AdherenceCalculationService {
 
     // Parse scheduled end time (format: "HH:mm:ss" or "HH:mm")
     const [hours, minutes] = schedule.shiftEnd.split(':').map(Number);
-    const scheduleDate = new Date(actualEnd);
-    scheduleDate.setHours(hours, minutes || 0, 0, 0);
-
-    // Convert schedule to Egypt timezone
+    
+    // Use the scheduleDate parameter to build scheduled time in Egypt timezone
     const scheduleDateStr = scheduleDate.toISOString().split('T')[0];
     const scheduleDateTime = new Date(`${scheduleDateStr}T${schedule.shiftEnd}${this.EGYPT_TIMEZONE}`);
     const scheduleUTC = new Date(scheduleDateTime.toISOString());
