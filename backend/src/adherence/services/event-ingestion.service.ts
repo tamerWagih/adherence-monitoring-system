@@ -229,14 +229,34 @@ export class EventIngestionService {
       } catch (error) {
         // If bulk insert fails, fall back to individual saves
         this.logger.warn(`Bulk insert failed, falling back to individual saves: ${error.message}`);
-        for (const event of validEvents) {
+        const eventsToRetry = [...validEvents];
+        const successfullyProcessed: AgentAdherenceEvent[] = [];
+        
+        for (const event of eventsToRetry) {
           try {
             await this.eventRepo.save(event);
+            successfullyProcessed.push(event);
           } catch (saveError) {
-            failedEvents.push(events[validEvents.indexOf(event)]);
+            // Find original eventDto for this event by matching key fields
+            const originalEventDto = events.find(
+              e => e.nt === event.nt && 
+              (e.event_timestamp || e.timestamp) === event.eventTimestamp.toISOString() &&
+              e.event_type === event.eventType
+            );
+            if (originalEventDto && !failedEvents.includes(originalEventDto)) {
+              failedEvents.push(originalEventDto);
+            }
             this.logger.error(`Failed to save event: ${saveError.message}`);
           }
         }
+        
+        // Update processed count based on successful saves
+        const processedCount = successfullyProcessed.length;
+        const failedCount = eventsToRetry.length - processedCount;
+        return {
+          processed: processedCount,
+          failed: failedEvents.length + failedCount,
+        };
       }
     }
 

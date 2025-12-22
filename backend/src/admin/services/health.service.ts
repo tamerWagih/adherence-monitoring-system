@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { EventIngestionQueue } from '../../adherence/queues/event-ingestion.queue';
 import { InjectConnection } from '@nestjs/typeorm';
 import { Connection } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,6 +21,8 @@ export class HealthService {
     private eventRepo: Repository<AgentAdherenceEvent>,
     @InjectRepository(AgentWorkstationConfiguration)
     private workstationRepo: Repository<AgentWorkstationConfiguration>,
+    @Optional()
+    private eventIngestionQueue?: EventIngestionQueue,
   ) {}
 
   /**
@@ -56,6 +59,33 @@ export class HealthService {
       where: { isActive: true },
     });
 
+    // Get queue stats if queue is available
+    let queueStats = null;
+    let queueStatus = 'unknown';
+    if (this.eventIngestionQueue) {
+      try {
+        queueStats = await this.eventIngestionQueue.getQueueStats();
+        // Determine queue status based on depth
+        if (queueStats.waiting > 10000) {
+          queueStatus = 'critical';
+        } else if (queueStats.waiting > 1000) {
+          queueStatus = 'warning';
+        } else {
+          queueStatus = 'operational';
+        }
+      } catch (error) {
+        queueStatus = 'error';
+        queueStats = {
+          waiting: 0,
+          active: 0,
+          completed: 0,
+          failed: 0,
+          delayed: 0,
+          total: 0,
+        };
+      }
+    }
+
     return {
       status: dbStatus === 'connected' ? 'healthy' : 'unhealthy',
       timestamp: new Date().toISOString(),
@@ -69,9 +99,13 @@ export class HealthService {
           response_time_ms: 0,
         },
         event_queue: {
-          status: 'operational', // TODO: Check BullMQ queue status
-          pending_jobs: 0,
-          processing_rate: 0,
+          status: queueStatus,
+          waiting: queueStats?.waiting || 0,
+          active: queueStats?.active || 0,
+          completed: queueStats?.completed || 0,
+          failed: queueStats?.failed || 0,
+          delayed: queueStats?.delayed || 0,
+          total: queueStats?.total || 0,
         },
       },
       metrics: {

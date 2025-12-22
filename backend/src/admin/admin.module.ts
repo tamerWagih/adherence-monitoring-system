@@ -23,7 +23,7 @@ import { AdherenceModule } from '../adherence/adherence.module';
       AgentWorkstationConfiguration,
       AgentAdherenceEvent,
     ]),
-    AdherenceModule, // Import to use WorkstationAuthService
+    AdherenceModule, // Import to use WorkstationAuthService and EventIngestionQueue (exported)
   ],
   controllers: [WorkstationsController, HealthController],
   providers: [WorkstationsService, HealthService],

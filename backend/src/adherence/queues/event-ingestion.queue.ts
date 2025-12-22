@@ -54,7 +54,7 @@ export class EventIngestionQueue {
         },
         removeOnComplete: {
           age: 3600, // Keep completed jobs for 1 hour
-          count: 1000, // Keep last 1000 completed jobs
+          count: 5000, // Keep last 5000 completed jobs
         },
         removeOnFail: {
           age: 86400, // Keep failed jobs for 24 hours
@@ -69,45 +69,49 @@ export class EventIngestionQueue {
   /**
    * Add batch of events to queue
    * 
+   * Optimized: Queues entire batch as a single job for better performance.
+   * Processor will handle batch processing with bulk insert optimization.
+   * 
    * @param workstationId - Workstation ID
    * @param events - Array of event DTOs
-   * @returns Array of job IDs
+   * @returns Job ID
    */
   async queueBatchEvents(
     workstationId: string,
     events: CreateAdherenceEventDto[],
-  ): Promise<string[]> {
-    const jobs = await Promise.all(
-      events.map((event) =>
-        this.eventQueue.add(
-          'ingest-event',
-          {
-            workstationId,
-            event,
-          },
-          {
-            attempts: 3,
-            backoff: {
-              type: 'exponential',
-              delay: 2000,
-            },
-            removeOnComplete: {
-              age: 3600,
-              count: 1000,
-            },
-            removeOnFail: {
-              age: 86400,
-            },
-          },
-        ),
-      ),
+  ): Promise<string> {
+    if (events.length === 0) {
+      throw new Error('Cannot queue empty batch');
+    }
+
+    // Queue entire batch as a single job for better performance
+    const job = await this.eventQueue.add(
+      'ingest-batch',
+      {
+        workstationId,
+        events,
+      },
+      {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        removeOnComplete: {
+          age: 3600, // Keep completed jobs for 1 hour
+          count: 5000, // Keep last 5000 completed jobs
+        },
+        removeOnFail: {
+          age: 86400, // Keep failed jobs for 24 hours
+          count: 10000, // Keep last 10000 failed jobs
+        },
+      },
     );
 
-    const jobIds = jobs.map((job) => job.id!).filter(Boolean) as string[];
     this.logger.debug(
-      `Queued ${jobIds.length} event jobs for workstation ${workstationId}`,
+      `Queued batch job ${job.id} with ${events.length} events for workstation ${workstationId}`,
     );
-    return jobIds;
+    return job.id!;
   }
 
   /**

@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule, TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { BullModule } from '@nestjs/bullmq';
 import { LoggerOptions, LogLevel } from 'typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -81,6 +82,30 @@ import { RedisModule } from './common/redis.module';
         limit: parseInt(process.env.RATE_LIMIT_GLOBAL || '1000', 10),
       },
     ]),
+
+    // BullMQ Module (for event ingestion queue)
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => {
+        const redisHost = configService.get<string>('REDIS_HOST') || 'localhost';
+        const redisPort = configService.get<number>('REDIS_PORT') || 6379;
+        const redisPassword = configService.get<string>('REDIS_PASSWORD');
+        const redisUrl = configService.get<string>('REDIS_URL');
+
+        const connection: any = redisUrl
+          ? redisUrl
+          : {
+              host: redisHost,
+              port: redisPort,
+              ...(redisPassword && { password: redisPassword }),
+            };
+
+        return {
+          connection,
+        };
+      },
+      inject: [ConfigService],
+    }),
   ],
   controllers: [AppController],
   providers: [AppService],

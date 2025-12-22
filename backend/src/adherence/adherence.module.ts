@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bullmq';
 import { AgentAdherenceEvent } from '../entities/agent-adherence-event.entity';
 import { AgentAdherenceSummary } from '../entities/agent-adherence-summary.entity';
 import { AgentAdherenceException } from '../entities/agent-adherence-exception.entity';
@@ -18,6 +19,8 @@ import { EventIngestionService } from './services/event-ingestion.service';
 import { WorkstationConfigService } from './services/workstation-config.service';
 import { WorkstationAuthService } from './services/workstation-auth.service';
 import { AgentStatusService } from './services/agent-status.service';
+import { EventIngestionQueue } from './queues/event-ingestion.queue';
+import { EventIngestionProcessor } from './queues/event-ingestion.processor';
 
 /**
  * AdherenceModule
@@ -34,6 +37,10 @@ import { AgentStatusService } from './services/agent-status.service';
  */
 @Module({
   imports: [
+    // BullMQ Queue Configuration
+    BullModule.registerQueue({
+      name: 'event-ingestion',
+    }),
     TypeOrmModule.forFeature([
       AgentAdherenceEvent,
       AgentAdherenceSummary,
@@ -54,8 +61,10 @@ import { AgentStatusService } from './services/agent-status.service';
     WorkstationConfigService,
     WorkstationAuthService,
     AgentStatusService,
+    EventIngestionQueue,
+    EventIngestionProcessor,
   ],
-  exports: [WorkstationAuthService], // Export for use in guards
+  exports: [WorkstationAuthService, EventIngestionQueue], // Export for use in guards and health monitoring
 })
 export class AdherenceModule {}
 

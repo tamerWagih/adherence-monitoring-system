@@ -8,14 +8,19 @@ import { CreateAdherenceEventDto } from '../../dto/create-adherence-event.dto';
  * EventIngestionProcessor
  * 
  * BullMQ processor for handling queued event ingestion jobs.
- * Processes events asynchronously during high load periods.
+ * Processes events asynchronously - Option 2 (Always Queue).
  * 
  * Configuration:
- * - Concurrency: 10 (processes 10 jobs concurrently)
+ * - Concurrency: 30 (processes 30 jobs concurrently)
  * - Retry: 3 attempts with exponential backoff
+ * - Supports both single events and batch events
  */
 @Processor('event-ingestion', {
-  concurrency: 10, // Process 10 jobs concurrently
+  concurrency: parseInt(process.env.QUEUE_WORKER_CONCURRENCY || '30', 10), // Process 30 jobs concurrently (configurable)
+  limiter: {
+    max: parseInt(process.env.QUEUE_WORKER_MAX_JOBS || '500', 10), // Max 500 jobs per duration
+    duration: 1000, // Per 1 second
+  },
 })
 export class EventIngestionProcessor extends WorkerHost {
   private readonly logger = new Logger(EventIngestionProcessor.name);
@@ -25,22 +30,79 @@ export class EventIngestionProcessor extends WorkerHost {
   }
 
   /**
+   * Process event ingestion job
+   * 
+   * Handles both single events ('ingest-event') and batch events ('ingest-batch')
+   */
+  async process(
+    job: Job<
+      | { workstationId: string; event: CreateAdherenceEventDto }
+      | { workstationId: string; events: CreateAdherenceEventDto[] }
+    >,
+  ) {
+    const { workstationId } = job.data;
+
+    // Check if it's a batch job
+    if ('events' in job.data && Array.isArray(job.data.events)) {
+      return this.processBatch(job as Job<{ workstationId: string; events: CreateAdherenceEventDto[] }>);
+    } else if ('event' in job.data) {
+      return this.processSingle(job as Job<{ workstationId: string; event: CreateAdherenceEventDto }>);
+    } else {
+      throw new Error(`Invalid job data format: ${JSON.stringify(job.data)}`);
+    }
+  }
+
+  /**
    * Process a single event ingestion job
    */
-  async process(job: Job<{ workstationId: string; event: CreateAdherenceEventDto }>) {
+  private async processSingle(job: Job<{ workstationId: string; event: CreateAdherenceEventDto }>) {
     const { workstationId, event } = job.data;
 
     this.logger.debug(
-      `Processing event ingestion job ${job.id} for workstation ${workstationId}`,
+      `Processing single event job ${job.id} for workstation ${workstationId}`,
     );
 
     try {
       await this.eventIngestionService.ingestEvent(workstationId, event);
       this.logger.debug(`Successfully processed event job ${job.id}`);
-      return { success: true };
+      return { success: true, processed: 1, failed: 0 };
     } catch (error) {
       this.logger.error(
         `Failed to process event job ${job.id}: ${error.message}`,
+        error.stack,
+      );
+      throw error; // BullMQ will retry based on job configuration
+    }
+  }
+
+  /**
+   * Process a batch event ingestion job
+   * 
+   * Uses bulk insert optimization for better performance.
+   */
+  private async processBatch(job: Job<{ workstationId: string; events: CreateAdherenceEventDto[] }>) {
+    const { workstationId, events } = job.data;
+
+    this.logger.debug(
+      `Processing batch job ${job.id} with ${events.length} events for workstation ${workstationId}`,
+    );
+
+    try {
+      const result = await this.eventIngestionService.ingestBatchEvents(
+        workstationId,
+        events,
+      );
+      this.logger.debug(
+        `Successfully processed batch job ${job.id}: ${result.processed} processed, ${result.failed} failed`,
+      );
+      return {
+        success: true,
+        processed: result.processed,
+        failed: result.failed,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to process batch job ${job.id}: ${error.message}`,
         error.stack,
       );
       throw error; // BullMQ will retry based on job configuration
