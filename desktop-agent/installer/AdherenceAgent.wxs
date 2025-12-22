@@ -159,10 +159,10 @@
 
     <InstallExecuteSequence>
       <!-- Stop/kill during major upgrade OR uninstall.
-           We schedule ONCE to avoid duplicate WiX symbols; this still runs before RemoveExistingProducts (upgrade)
-           and early during uninstall. -->
+           IMPORTANT: must run BEFORE RemoveExistingProducts, otherwise the old service/tray can keep files locked
+           and cause fast rollback during upgrade/uninstall. -->
       <!-- NOTE: MajorUpgrade sets WIX_UPGRADE_DETECTED (not OLDPRODUCTS). -->
-      <Custom Action="DisableServiceRecovery_SetProperty" After="InstallInitialize"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
+      <Custom Action="DisableServiceRecovery_SetProperty" Before="RemoveExistingProducts"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
       <Custom Action="DisableServiceRecovery" After="DisableServiceRecovery_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
 
       <Custom Action="StopService_SetProperty" After="DisableServiceRecovery"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
