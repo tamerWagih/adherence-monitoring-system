@@ -378,6 +378,10 @@ export class AdherenceCalculationService {
     let nonWorkAppTimeMinutes = 0;
     let workAppTimeMinutes = 0;
 
+    // Find actual start time (LOGIN event)
+    const loginEvent = events.find(e => e.eventType === EventType.LOGIN);
+    const actualStartTime = loginEvent?.eventTimestamp || null;
+
     // Track idle periods
     let idleStart: Date | null = null;
     for (const event of events) {
@@ -406,9 +410,15 @@ export class AdherenceCalculationService {
     // Track time spent in each application between events
     let currentAppStart: Date | null = null;
     let currentAppIsWork: boolean | null = null;
-    let lastEventTime: Date | null = null;
+    let lastEventTime: Date | null = actualStartTime; // Start from LOGIN time
+    let firstAppEventTime: Date | null = null;
 
-    for (const event of events) {
+    // Sort events by timestamp to ensure correct order
+    const sortedEvents = [...events].sort((a, b) => 
+      a.eventTimestamp.getTime() - b.eventTimestamp.getTime()
+    );
+
+    for (const event of sortedEvents) {
       const eventTime = event.eventTimestamp;
 
       // Calculate time since last event for current app
@@ -429,6 +439,16 @@ export class AdherenceCalculationService {
         event.eventType === EventType.WINDOW_CHANGE ||
         event.eventType === EventType.APPLICATION_FOCUS
       ) {
+        // If this is the first app event and we have a start time, count time from start to first app event as productive
+        if (firstAppEventTime === null && actualStartTime && lastEventTime) {
+          const durationMs = eventTime.getTime() - lastEventTime.getTime();
+          const durationMinutes = Math.round(durationMs / (1000 * 60));
+          // Assume productive time from LOGIN until first app event (agent is logged in and working)
+          workAppTimeMinutes += durationMinutes;
+          productiveTimeMinutes += durationMinutes;
+          firstAppEventTime = eventTime;
+        }
+        
         currentAppStart = eventTime;
         currentAppIsWork = event.isWorkApplication === true;
       }
@@ -436,9 +456,21 @@ export class AdherenceCalculationService {
       lastEventTime = eventTime;
     }
 
-    // Calculate time for the last app until end of shift (if schedule end time available)
-    if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null && schedule.shiftEnd) {
-      // Parse scheduled end time and convert to Date
+    // If no APPLICATION_FOCUS events exist, count entire shift from LOGIN as productive
+    if (firstAppEventTime === null && actualStartTime && schedule.shiftEnd) {
+      const [endHours, endMinutes] = schedule.shiftEnd.split(':').map(Number);
+      const scheduleDateStr = actualStartTime.toISOString().split('T')[0];
+      const scheduledEndDateTime = new Date(`${scheduleDateStr}T${schedule.shiftEnd}${this.EGYPT_TIMEZONE}`);
+      const scheduledEndUTC = new Date(scheduledEndDateTime.toISOString());
+
+      if (actualStartTime < scheduledEndUTC) {
+        const durationMs = scheduledEndUTC.getTime() - actualStartTime.getTime();
+        const durationMinutes = Math.round(durationMs / (1000 * 60));
+        workAppTimeMinutes += durationMinutes;
+        productiveTimeMinutes += durationMinutes;
+      }
+    } else if (lastEventTime && currentAppStart !== null && currentAppIsWork !== null && schedule.shiftEnd) {
+      // Calculate time for the last app until end of shift (if schedule end time available)
       const [endHours, endMinutes] = schedule.shiftEnd.split(':').map(Number);
       const scheduleDateStr = lastEventTime.toISOString().split('T')[0];
       const scheduledEndDateTime = new Date(`${scheduleDateStr}T${schedule.shiftEnd}${this.EGYPT_TIMEZONE}`);
