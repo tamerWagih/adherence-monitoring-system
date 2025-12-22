@@ -469,6 +469,9 @@ export class AdherenceCalculationService {
 
   /**
    * Get approved exceptions for the day
+   * 
+   * Note: Database uses start_time/end_time (TIMESTAMPTZ), not exception_date (DATE).
+   * We need to check if the exception overlaps with the schedule date.
    */
   private async getExceptions(
     employeeId: string,
@@ -476,34 +479,49 @@ export class AdherenceCalculationService {
   ): Promise<AgentAdherenceException[]> {
     const dateStr = scheduleDate.toISOString().split('T')[0];
     
-    // Use raw query for date comparison to ensure correct matching
+    // Calculate start and end of day in Egypt timezone, then convert to UTC for query
+    const startOfDay = new Date(`${dateStr}T00:00:00+02:00`);
+    const endOfDay = new Date(`${dateStr}T23:59:59+02:00`);
+    const startUTC = startOfDay.toISOString();
+    const endUTC = endOfDay.toISOString();
+    
+    // Use raw query to check if exception overlaps with the schedule date
+    // Exception overlaps if: start_time <= end_of_day AND end_time >= start_of_day
     const results = await this.exceptionRepo.query(
       `
       SELECT * FROM agent_adherence_exceptions
       WHERE employee_id = $1
-        AND exception_date = $2::date
-        AND status = $3
+        AND status = $2
+        AND start_time <= $3::timestamptz
+        AND end_time >= $4::timestamptz
       `,
-      [employeeId, dateStr, 'APPROVED'],
+      [employeeId, 'APPROVED', endUTC, startUTC],
     );
 
     // Convert raw results to entity objects
-    return results.map((row: any) => ({
-      id: row.id,
-      employeeId: row.employee_id,
-      exceptionType: row.exception_type,
-      exceptionDate: row.exception_date,
-      status: row.status,
-      justification: row.justification,
-      requestedAdjustmentMinutes: row.requested_adjustment_minutes,
-      approvedAdjustmentMinutes: row.approved_adjustment_minutes,
-      createdBy: row.created_by,
-      reviewedBy: row.reviewed_by,
-      reviewNotes: row.review_notes,
-      reviewedAt: row.reviewed_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    })) as AgentAdherenceException[];
+    // Note: Database has start_time/end_time, but entity expects exceptionDate
+    // We'll use start_time date as exceptionDate for compatibility
+    return results.map((row: any) => {
+      const startTime = new Date(row.start_time);
+      const exceptionDate = new Date(startTime.toISOString().split('T')[0] + 'T00:00:00Z');
+      
+      return {
+        id: row.id,
+        employeeId: row.employee_id,
+        exceptionType: row.exception_type,
+        exceptionDate: exceptionDate,
+        status: row.status,
+        justification: row.justification || row.description,
+        requestedAdjustmentMinutes: row.duration_minutes || null,
+        approvedAdjustmentMinutes: row.duration_minutes || null,
+        createdBy: row.requested_by,
+        reviewedBy: row.approved_by || row.rejected_by,
+        reviewNotes: row.rejection_reason,
+        reviewedAt: row.approved_at || row.rejected_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    }) as AgentAdherenceException[];
   }
 
   /**
