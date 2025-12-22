@@ -315,6 +315,8 @@ export class AdherenceCalculationService {
     }
 
     // Match actual breaks to scheduled breaks
+    // Use a set to track which actual breaks have been matched (prevent double-matching)
+    const matchedActualBreakIndices = new Set<number>();
     let matchedBreaks = 0;
     let missedBreaks = 0;
     let extendedBreaks = 0;
@@ -326,7 +328,11 @@ export class AdherenceCalculationService {
       const scheduledStart = this.parseTimeToDate(scheduleDate, scheduled.start);
       const scheduledEnd = this.parseTimeToDate(scheduleDate, scheduled.end);
 
-      const matchingBreak = actualBreaks.find((actual) => {
+      // Find first unmatched actual break that matches this scheduled break
+      const matchingBreakIndex = actualBreaks.findIndex((actual, index) => {
+        if (matchedActualBreakIndices.has(index)) {
+          return false; // Already matched to another scheduled break
+        }
         // Break matches if it starts within the scheduled window
         // and has at least the minimum duration (allowing for short breaks)
         return (
@@ -336,7 +342,9 @@ export class AdherenceCalculationService {
         );
       });
 
-      if (matchingBreak) {
+      if (matchingBreakIndex !== -1) {
+        const matchingBreak = actualBreaks[matchingBreakIndex];
+        matchedActualBreakIndices.add(matchingBreakIndex);
         matchedBreaks++;
         // Check if extended (duration exceeds scheduled + threshold)
         if (matchingBreak.duration_minutes > scheduled.duration_minutes + EXTENDED_BREAK_THRESHOLD) {
