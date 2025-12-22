@@ -28,11 +28,12 @@
     <!-- Ensure correct admin detection under UAC (helps avoid confusing admin-required failures) -->
     <Property Id="MSIUSEREALADMINDETECTION" Value="1" />
 
-    <!-- MajorUpgrade: Remove old version before installing new -->
-    <!-- Schedule: afterInstallInitialize so we can stop service/tray BEFORE RemoveExistingProducts (prevents rollback/file locks) -->
+    <!-- MajorUpgrade -->
+    <!-- Use the safe default sequencing (prevents Error 2613 loops on some systems). -->
+    <!-- Stop/kill actions are executed during the OLD product uninstall (UPGRADINGPRODUCTCODE), not before RemoveExistingProducts. -->
     <MajorUpgrade 
         DowngradeErrorMessage="A newer version of [ProductName] is already installed."
-        Schedule="afterInstallInitialize"
+        Schedule="afterInstallValidate"
         AllowSameVersionUpgrades="yes" />
     <MediaTemplate EmbedCab="yes" />
 
@@ -156,18 +157,19 @@
                   Return="ignore" />
 
     <InstallExecuteSequence>
-      <!-- Stop service + kill tray BEFORE RemoveExistingProducts to prevent rollback/file locks -->
-      <Custom Action="DisableServiceRecovery_SetProperty" Before="DisableServiceRecovery"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
-      <Custom Action="DisableServiceRecovery" Before="StopService"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
+      <!-- Stop/kill during uninstall and major upgrade uninstall (old product context) -->
+      <!-- IMPORTANT: UPGRADINGPRODUCTCODE is set in the OLD product MSI during major upgrade removal -->
+      <Custom Action="DisableServiceRecovery_SetProperty" After="StopServices"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="DisableServiceRecovery" After="DisableServiceRecovery_SetProperty"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
 
-      <Custom Action="StopService_SetProperty" Before="StopService"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
-      <Custom Action="StopService" Before="KillService_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
+      <Custom Action="StopService_SetProperty" After="DisableServiceRecovery"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="StopService" After="StopService_SetProperty"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
 
-      <Custom Action="KillService_SetProperty" Before="KillService"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
-      <Custom Action="KillService" Before="KillTray_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillService_SetProperty" After="StopService"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillService" After="KillService_SetProperty"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
 
-      <Custom Action="KillTray_SetProperty" Before="KillTray"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
-      <Custom Action="KillTray" Before="RemoveExistingProducts"><![CDATA[WIX_UPGRADE_DETECTED OR Installed OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillTray_SetProperty" After="KillService"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
+      <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
 
       <!-- Set service ACL and recovery on install/upgrade -->
       <!-- Service exists after InstallServices, and Return="ignore" handles any errors gracefully -->
