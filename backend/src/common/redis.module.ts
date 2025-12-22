@@ -83,7 +83,6 @@ import Redis from 'ioredis';
           connectTimeout: 5000, // 5 second connection timeout
           commandTimeout: 3000, // 3 second command timeout
           enableOfflineQueue: true, // Queue commands when disconnected
-          maxRetriesPerRequest: 1, // Retry once if command fails
         };
 
         const client = typeof connectionOptions === 'string'

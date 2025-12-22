@@ -152,14 +152,14 @@ import { RedisModule } from './common/redis.module';
               port: port ? parseInt(port, 10) : redisPort,
               password: password ? decodeURIComponent(password) : redisPassword,
               connectTimeout: 5000,
-              commandTimeout: 5000,
-              lazyConnect: true,
+              commandTimeout: 3000,
+              lazyConnect: false, // Connect immediately
               retryStrategy: (times: number) => {
                 const delay = Math.min(times * 50, 2000);
                 return delay;
               },
-              maxRetriesPerRequest: 3,
-              enableOfflineQueue: false,
+              maxRetriesPerRequest: 1,
+              enableOfflineQueue: true,
             };
           } else {
             // Fallback: use individual settings
@@ -177,14 +177,14 @@ import { RedisModule } from './common/redis.module';
           bullmqConnection = {
             ...connection,
             connectTimeout: 5000,
-            commandTimeout: 5000,
-            lazyConnect: true,
+            commandTimeout: 3000,
+            lazyConnect: false, // Connect immediately
             retryStrategy: (times: number) => {
               const delay = Math.min(times * 50, 2000);
               return delay;
             },
-            maxRetriesPerRequest: 3,
-            enableOfflineQueue: false,
+            maxRetriesPerRequest: 1,
+            enableOfflineQueue: true,
           };
         }
 
