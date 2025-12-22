@@ -29,12 +29,14 @@
     <Property Id="MSIUSEREALADMINDETECTION" Value="1" />
 
     <!-- MajorUpgrade -->
-    <!-- IMPORTANT:
-         We schedule RemoveExistingProducts AFTER InstallInitialize so we can run deferred stop/kill actions
-         before the old product is removed. This avoids tray/service re-spawning and file-lock issues. -->
+    <!-- Schedule="afterInstallExecute" is the safest approach:
+         - New files are installed first (while old product is still present)
+         - Then old product is removed
+         - This avoids "RemoveExistingProducts sequenced incorrectly" (error 2613)
+         - File locks are avoided because new files go to temp locations first -->
     <MajorUpgrade 
         DowngradeErrorMessage="A newer version of [ProductName] is already installed."
-        Schedule="afterInstallInitialize"
+        Schedule="afterInstallExecute"
         AllowSameVersionUpgrades="yes" />
     <MediaTemplate EmbedCab="yes" />
 
@@ -174,21 +176,24 @@
                   Return="ignore" />
 
     <InstallExecuteSequence>
-      <!-- Stop/kill during major upgrade OR uninstall.
-           IMPORTANT: must run BEFORE RemoveExistingProducts, otherwise the old service/tray can keep files locked
-           and cause fast rollback during upgrade/uninstall. -->
-      <!-- NOTE: MajorUpgrade sets WIX_UPGRADE_DETECTED (not OLDPRODUCTS). -->
-      <Custom Action="DisableServiceRecovery_SetProperty" Before="RemoveExistingProducts"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
-      <Custom Action="DisableServiceRecovery" After="DisableServiceRecovery_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
+      <!-- With Schedule="afterInstallExecute", RemoveExistingProducts runs AFTER InstallFinalize.
+           So we run stop/kill actions early (after InstallInitialize) for uninstall scenarios,
+           and the upgrade scenario handles itself because new files install first. -->
+      
+      <!-- Stop/kill only during explicit uninstall (REMOVE="ALL").
+           For upgrades, the old product removal happens AFTER new install completes,
+           so file locks aren't an issue. -->
+      <Custom Action="DisableServiceRecovery_SetProperty" After="InstallInitialize"><![CDATA[REMOVE="ALL"]]></Custom>
+      <Custom Action="DisableServiceRecovery" After="DisableServiceRecovery_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
 
-      <Custom Action="StopService_SetProperty" After="DisableServiceRecovery"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
-      <Custom Action="StopService" After="StopService_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
+      <Custom Action="StopService_SetProperty" After="DisableServiceRecovery"><![CDATA[REMOVE="ALL"]]></Custom>
+      <Custom Action="StopService" After="StopService_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
 
-      <Custom Action="KillService_SetProperty" After="StopService"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
-      <Custom Action="KillService" After="KillService_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
+      <Custom Action="KillService_SetProperty" After="StopService"><![CDATA[REMOVE="ALL"]]></Custom>
+      <Custom Action="KillService" After="KillService_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
 
-      <Custom Action="KillTray_SetProperty" After="KillService"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
-      <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
+      <Custom Action="KillTray_SetProperty" After="KillService"><![CDATA[REMOVE="ALL"]]></Custom>
+      <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
 
       <!-- Set service ACL and recovery on install/upgrade -->
       <!-- Service exists after InstallServices, and Return="ignore" handles any errors gracefully -->
