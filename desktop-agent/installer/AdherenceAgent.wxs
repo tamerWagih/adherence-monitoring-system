@@ -3,7 +3,7 @@
      xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
 
   <?define ProductName = "Adherence Monitoring Agent" ?>
-  <?define ProductVersion = "1.0.14" ?>
+  <?define ProductVersion = "1.0.15" ?>
   <?define ProductCode = "*" ?>
   <?define UpgradeCode = "A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D" ?>
   <?define Manufacturer = "Octopus WFM" ?>
@@ -177,23 +177,23 @@
 
     <InstallExecuteSequence>
       <!-- With Schedule="afterInstallExecute", RemoveExistingProducts runs AFTER InstallFinalize.
-           So we run stop/kill actions early (after InstallInitialize) for uninstall scenarios,
-           and the upgrade scenario handles itself because new files install first. -->
+           We still need to stop/kill early during UPGRADES so that:
+           1. Files can be overwritten without locks
+           2. New service/tray start fresh with new code
+           Also run during explicit uninstall (REMOVE="ALL"). -->
       
-      <!-- Stop/kill only during explicit uninstall (REMOVE="ALL").
-           For upgrades, the old product removal happens AFTER new install completes,
-           so file locks aren't an issue. -->
-      <Custom Action="DisableServiceRecovery_SetProperty" After="InstallInitialize"><![CDATA[REMOVE="ALL"]]></Custom>
-      <Custom Action="DisableServiceRecovery" After="DisableServiceRecovery_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
+      <!-- Stop/kill during upgrade OR uninstall -->
+      <Custom Action="DisableServiceRecovery_SetProperty" After="InstallInitialize"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
+      <Custom Action="DisableServiceRecovery" After="DisableServiceRecovery_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
 
-      <Custom Action="StopService_SetProperty" After="DisableServiceRecovery"><![CDATA[REMOVE="ALL"]]></Custom>
-      <Custom Action="StopService" After="StopService_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
+      <Custom Action="StopService_SetProperty" After="DisableServiceRecovery"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
+      <Custom Action="StopService" After="StopService_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
 
-      <Custom Action="KillService_SetProperty" After="StopService"><![CDATA[REMOVE="ALL"]]></Custom>
-      <Custom Action="KillService" After="KillService_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
+      <Custom Action="KillService_SetProperty" After="StopService"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
+      <Custom Action="KillService" After="KillService_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
 
-      <Custom Action="KillTray_SetProperty" After="KillService"><![CDATA[REMOVE="ALL"]]></Custom>
-      <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[REMOVE="ALL"]]></Custom>
+      <Custom Action="KillTray_SetProperty" After="KillService"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
+      <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[WIX_UPGRADE_DETECTED OR (REMOVE="ALL")]]></Custom>
 
       <!-- Set service ACL and recovery on install/upgrade -->
       <!-- Service exists after InstallServices, and Return="ignore" handles any errors gracefully -->
