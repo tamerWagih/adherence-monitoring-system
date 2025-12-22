@@ -5,7 +5,11 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { Employee } from './employee.entity';
+import { User } from './user.entity';
 
 /**
  * Agent Adherence Exception Entity
@@ -25,6 +29,10 @@ export class AgentAdherenceException {
   @Column({ name: 'employee_id', type: 'uuid' })
   @Index()
   employeeId: string;
+
+  @ManyToOne(() => Employee, { nullable: true })
+  @JoinColumn({ name: 'employee_id' })
+  employee?: Employee;
 
   @Column({
     name: 'exception_type',
@@ -56,8 +64,16 @@ export class AgentAdherenceException {
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy?: string;
 
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'created_by' })
+  createdByUser?: User;
+
   @Column({ name: 'reviewed_by', type: 'uuid', nullable: true })
   reviewedBy?: string;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'reviewed_by' })
+  reviewedByUser?: User;
 
   @Column({ name: 'review_notes', type: 'text', nullable: true })
   reviewNotes?: string;

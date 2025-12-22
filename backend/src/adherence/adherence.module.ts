@@ -9,6 +9,8 @@ import { ClientWebsite } from '../entities/client-website.entity';
 import { CallingApp } from '../entities/calling-app.entity';
 import { EmployeePersonalInfo } from '../entities/employee-personal-info.entity';
 import { AgentSchedule } from '../entities/agent-schedule.entity';
+import { Employee } from '../entities/employee.entity';
+import { User } from '../entities/user.entity';
 import { EventsController } from './controllers/events.controller';
 import { WorkstationConfigController } from './controllers/workstation-config.controller';
 import { AgentStatusController } from './controllers/agent-status.controller';
@@ -42,6 +44,8 @@ import { AgentStatusService } from './services/agent-status.service';
       CallingApp, // For calling app detection
       EmployeePersonalInfo, // For NT account resolution
       AgentSchedule, // For break schedule queries
+      Employee, // For adherence relationships
+      User, // For exception relationships
     ]),
   ],
   controllers: [EventsController, WorkstationConfigController, AgentStatusController],

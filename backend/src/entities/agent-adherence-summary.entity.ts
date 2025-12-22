@@ -8,6 +8,7 @@ import {
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
+import { Employee } from './employee.entity';
 
 /**
  * Agent Adherence Summary Entity
@@ -25,6 +26,10 @@ export class AgentAdherenceSummary {
   @Column({ name: 'employee_id', type: 'uuid' })
   @Index()
   employeeId: string;
+
+  @ManyToOne(() => Employee, { nullable: true })
+  @JoinColumn({ name: 'employee_id' })
+  employee?: Employee;
 
   @Column({ name: 'schedule_date', type: 'date' })
   scheduleDate: Date;
