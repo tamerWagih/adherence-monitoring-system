@@ -92,6 +92,14 @@ import { RedisModule } from './common/redis.module';
         const redisPassword = configService.get<string>('REDIS_PASSWORD');
         const redisUrl = configService.get<string>('REDIS_URL');
 
+        // Debug logging
+        console.log('BullMQ Redis Configuration:', {
+          REDIS_HOST: redisHost,
+          REDIS_PORT: redisPort,
+          REDIS_PASSWORD: redisPassword ? '***' : 'not set',
+          REDIS_URL: redisUrl || 'not set',
+        });
+
         let connection: any;
         
         if (redisUrl) {
@@ -130,8 +138,64 @@ import { RedisModule } from './common/redis.module';
           };
         }
 
+        // BullMQ expects connection as object or ioredis instance
+        // If connection is a string URL, convert to object format for BullMQ
+        let bullmqConnection: any;
+        
+        if (typeof connection === 'string') {
+          // Parse URL string to object format
+          const urlMatch = connection.match(/^redis:\/\/(?::([^@]+)@)?([^:]+)(?::(\d+))?$/);
+          if (urlMatch) {
+            const [, password, host, port] = urlMatch;
+            bullmqConnection = {
+              host: host || redisHost,
+              port: port ? parseInt(port, 10) : redisPort,
+              password: password ? decodeURIComponent(password) : redisPassword,
+              connectTimeout: 5000,
+              commandTimeout: 5000,
+              lazyConnect: true,
+              retryStrategy: (times: number) => {
+                const delay = Math.min(times * 50, 2000);
+                return delay;
+              },
+              maxRetriesPerRequest: 3,
+              enableOfflineQueue: false,
+            };
+          } else {
+            // Fallback: use individual settings
+            bullmqConnection = {
+              host: redisHost,
+              port: redisPort,
+              password: redisPassword,
+              connectTimeout: 5000,
+              commandTimeout: 5000,
+              lazyConnect: true,
+            };
+          }
+        } else {
+          // Connection is already an object
+          bullmqConnection = {
+            ...connection,
+            connectTimeout: 5000,
+            commandTimeout: 5000,
+            lazyConnect: true,
+            retryStrategy: (times: number) => {
+              const delay = Math.min(times * 50, 2000);
+              return delay;
+            },
+            maxRetriesPerRequest: 3,
+            enableOfflineQueue: false,
+          };
+        }
+
+        console.log('BullMQ Connection:', {
+          host: bullmqConnection.host,
+          port: bullmqConnection.port,
+          hasPassword: !!bullmqConnection.password,
+        });
+
         return {
-          connection,
+          connection: bullmqConnection,
           // Add connection options to prevent blocking
           defaultJobOptions: {
             attempts: 3,

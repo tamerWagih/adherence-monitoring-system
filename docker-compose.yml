@@ -29,8 +29,8 @@ services:
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
       - CORS_ORIGIN=${CORS_ORIGIN}
       - LOG_LEVEL=${LOG_LEVEL:-info}
-    depends_on:
-      - redis
+    # depends_on:
+    #   - redis  # Commented out - using external Redis on DB VM (10.20.13.77)
     networks:
       - adherence-network
     restart: unless-stopped

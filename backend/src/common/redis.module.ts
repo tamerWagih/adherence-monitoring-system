@@ -20,6 +20,14 @@ import Redis from 'ioredis';
         const redisPassword = configService.get<string>('REDIS_PASSWORD');
         const redisUrl = configService.get<string>('REDIS_URL');
 
+        // Debug logging
+        console.log('Redis Configuration:', {
+          REDIS_HOST: redisHost,
+          REDIS_PORT: redisPort,
+          REDIS_PASSWORD: redisPassword ? '***' : 'not set',
+          REDIS_URL: redisUrl || 'not set',
+        });
+
         // Build connection options
         let connectionOptions: any;
         
