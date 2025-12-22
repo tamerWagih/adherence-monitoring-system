@@ -214,7 +214,7 @@ public class TeamsMonitor
         var evt = new AdherenceEvent
         {
             EventType = EventTypes.TeamsMeetingEnd,
-            EventTimestampUtc = DateTime.UtcNow,
+            EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
             NtAccount = ntAccount,
             ApplicationName = "Teams",
             IsWorkApplication = true,
@@ -276,7 +276,7 @@ public class TeamsMonitor
         var evt = new AdherenceEvent
         {
             EventType = EventTypes.TeamsChatActive,
-            EventTimestampUtc = DateTime.UtcNow,
+            EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
             NtAccount = ntAccount,
             ApplicationName = "Teams",
             WindowTitle = _lastTeamsWindowTitle,

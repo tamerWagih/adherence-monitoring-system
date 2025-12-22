@@ -128,7 +128,7 @@ public class ActiveWindowMonitor
             var evt = new AdherenceEvent
             {
                 EventType = EventTypes.WindowChange,
-                EventTimestampUtc = DateTime.UtcNow,
+                EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                 NtAccount = ntAccount,
                 ApplicationName = procName,
                 ApplicationPath = procPath,

@@ -17,6 +17,8 @@ public class LoginLogoffMonitor
     private readonly IEventBuffer _buffer;
     private EventLogWatcher? _logonWatcher;
     private EventLogWatcher? _logoffWatcher;
+    private readonly Dictionary<string, DateTime> _recentLogins; // Track recent logins to prevent duplicates
+    private readonly TimeSpan _duplicateWindow = TimeSpan.FromSeconds(5); // 5-second window for duplicate detection
 
     // Security Event IDs
     private const int LogonEventId = 4624;
@@ -29,6 +31,7 @@ public class LoginLogoffMonitor
     {
         _logger = logger;
         _buffer = buffer;
+        _recentLogins = new Dictionary<string, DateTime>();
     }
 
     public void Start(CancellationToken token)
@@ -100,10 +103,36 @@ public class LoginLogoffMonitor
                 _logger.LogWarning("Could not extract NT account from Security Event Log, using current session: {NtAccount}", ntAccount);
             }
 
+            // Deduplicate LOGIN events (Event ID 4624 can fire multiple times for same logon)
+            if (eventType == EventTypes.Login)
+            {
+                var eventTime = record.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow;
+                var dedupKey = $"{ntAccount}_{record.Id}_{eventTime:yyyyMMddHHmmss}";
+                
+                // Clean up old entries
+                var cutoff = DateTime.UtcNow - _duplicateWindow;
+                var keysToRemove = _recentLogins.Where(kvp => kvp.Value < cutoff).Select(kvp => kvp.Key).ToList();
+                foreach (var key in keysToRemove)
+                {
+                    _recentLogins.Remove(key);
+                }
+                
+                // Check for duplicate
+                if (_recentLogins.ContainsKey(dedupKey))
+                {
+                    _logger.LogDebug("Skipping duplicate LOGIN event: {NtAccount}, EventID: {EventId}, Time: {Time}", 
+                        ntAccount, record.Id, eventTime);
+                    return;
+                }
+                
+                _recentLogins[dedupKey] = eventTime;
+            }
+
+            var eventTimeUtc = record.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow;
             await _buffer.AddAsync(new AdherenceEvent
             {
                 EventType = eventType,
-                EventTimestampUtc = record.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow,
+                EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(eventTimeUtc),
                 NtAccount = ntAccount,
                 Metadata = new Dictionary<string, object>
                 {
@@ -173,7 +202,7 @@ public class LoginLogoffMonitor
         await _buffer.AddAsync(new AdherenceEvent
         {
             EventType = EventTypes.Login,
-            EventTimestampUtc = DateTime.UtcNow,
+            EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
             NtAccount = ntAccount,
             Metadata = new Dictionary<string, object>
             {

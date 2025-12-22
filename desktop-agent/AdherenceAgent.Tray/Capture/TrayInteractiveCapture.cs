@@ -92,10 +92,12 @@ public sealed class TrayInteractiveCapture : IDisposable
         private readonly Action _ok;
         private readonly Action<Exception> _fail;
         private readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(5);
+        private readonly TimeSpan _minEventInterval = TimeSpan.FromSeconds(3); // Throttle: max 1 event per 3 seconds
         private System.Threading.Timer? _timer;
         private IntPtr _lastHandle = IntPtr.Zero;
         private string? _lastWindowTitle;
         private string? _lastProcessPath;
+        private DateTime _lastEventTime = DateTime.MinValue;
 
         // Browser process names (covered by BrowserTabMonitor)
         private static readonly string[] BrowserProcessNames = { "chrome", "msedge", "firefox", "brave", "opera" };
@@ -140,9 +142,21 @@ public sealed class TrayInteractiveCapture : IDisposable
                     return;
                 }
 
+                // Throttle: don't create events more frequently than minEventInterval
+                var now = DateTime.UtcNow;
+                if ((now - _lastEventTime) < _minEventInterval)
+                {
+                    // Update last seen but don't create event yet (will be picked up on next poll if still changed)
+                    _lastHandle = hWnd;
+                    _lastWindowTitle = title;
+                    _lastProcessPath = procPath;
+                    return;
+                }
+
                 _lastHandle = hWnd;
                 _lastWindowTitle = title;
                 _lastProcessPath = procPath;
+                _lastEventTime = now;
 
                 var isWork = ApplicationClassifier.ClassifyApplication(
                     procName,
@@ -153,7 +167,7 @@ public sealed class TrayInteractiveCapture : IDisposable
                 await _buffer.AddAsync(new AdherenceEvent
                 {
                     EventType = EventTypes.WindowChange,
-                    EventTimestampUtc = DateTime.UtcNow,
+                    EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                     NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
                     ApplicationName = procName,
                     ApplicationPath = procPath,
@@ -206,7 +220,7 @@ public sealed class TrayInteractiveCapture : IDisposable
                     await _buffer.AddAsync(new AdherenceEvent
                     {
                         EventType = EventTypes.CallingAppInCall,
-                        EventTimestampUtc = DateTime.UtcNow,
+                        EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                         NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
                         ApplicationName = processName,
                         WindowTitle = windowTitle,
@@ -351,7 +365,7 @@ public sealed class TrayInteractiveCapture : IDisposable
                 await _buffer.AddAsync(new AdherenceEvent
                 {
                     EventType = EventTypes.BrowserTabChange,
-                    EventTimestampUtc = DateTime.UtcNow,
+                    EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                     NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
                     ApplicationName = procName,
                     WindowTitle = title,
@@ -476,7 +490,7 @@ public sealed class TrayInteractiveCapture : IDisposable
                 await _buffer.AddAsync(new AdherenceEvent
                 {
                     EventType = EventTypes.ClientWebsiteAccess,
-                    EventTimestampUtc = DateTime.UtcNow,
+                    EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                     NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
                     WindowTitle = title,
                     Metadata = new Dictionary<string, object>
@@ -536,7 +550,7 @@ public sealed class TrayInteractiveCapture : IDisposable
                     await _buffer.AddAsync(new AdherenceEvent
                     {
                         EventType = EventTypes.CallingAppInCall,
-                        EventTimestampUtc = DateTime.UtcNow,
+                        EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                         NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
                         ApplicationName = processName,
                         WindowTitle = title,
@@ -614,7 +628,7 @@ public sealed class TrayInteractiveCapture : IDisposable
                         await _buffer.AddAsync(new AdherenceEvent
                         {
                             EventType = EventTypes.TeamsMeetingEnd,
-                            EventTimestampUtc = DateTime.UtcNow,
+                            EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                             NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
                             ApplicationName = "Teams",
                             IsWorkApplication = true
@@ -639,7 +653,7 @@ public sealed class TrayInteractiveCapture : IDisposable
                     await _buffer.AddAsync(new AdherenceEvent
                     {
                         EventType = EventTypes.TeamsMeetingStart,
-                        EventTimestampUtc = DateTime.UtcNow,
+                        EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                         NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
                         ApplicationName = "Teams",
                         WindowTitle = title,
@@ -653,7 +667,7 @@ public sealed class TrayInteractiveCapture : IDisposable
                     await _buffer.AddAsync(new AdherenceEvent
                     {
                         EventType = EventTypes.TeamsMeetingEnd,
-                        EventTimestampUtc = DateTime.UtcNow,
+                        EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                         NtAccount = WindowsIdentityHelper.GetCurrentNtAccount(),
                         ApplicationName = "Teams",
                         IsWorkApplication = true

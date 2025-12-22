@@ -24,9 +24,11 @@ public class ProcessMonitor
     private readonly IEventBuffer _buffer;
     private readonly Dictionary<int, ProcessStartInfo> _pendingProcesses; // Track pending processes waiting for debounce
     private readonly HashSet<int> _trackedProcesses; // Processes that have APPLICATION_START events created
+    private readonly Dictionary<string, DateTime> _recentStarts; // Track recent APPLICATION_START events by process name+path for deduplication
     private ManagementEventWatcher? _processStartWatcher;
     private ManagementEventWatcher? _processStopWatcher;
     private readonly TimeSpan _minProcessLifetime = TimeSpan.FromSeconds(5); // Minimum 5 seconds to be considered a real application
+    private readonly TimeSpan _deduplicationWindow = TimeSpan.FromSeconds(5); // Deduplicate APPLICATION_START events within 5 seconds
 
     private class ProcessStartInfo
     {
@@ -52,6 +54,7 @@ public class ProcessMonitor
         _buffer = buffer;
         _trackedProcesses = new HashSet<int>();
         _pendingProcesses = new Dictionary<int, ProcessStartInfo>();
+        _recentStarts = new Dictionary<string, DateTime>();
     }
 
     public void Start(CancellationToken token)
@@ -242,6 +245,45 @@ public class ProcessMonitor
                     // Check if process is still pending (not ended yet)
                     if (_pendingProcesses.TryGetValue(processId, out var info) && info.CancellationTokenSource == cts)
                     {
+                        // Check for deduplication: skip if we've already created an APPLICATION_START event
+                        // for this process name+path within the deduplication window
+                        var processKey = $"{info.ProcessName}|{info.ProcessPath ?? string.Empty}";
+                        var now = DateTime.UtcNow;
+                        
+                        lock (_recentStarts)
+                        {
+                            // Clean up old entries
+                            var keysToRemove = new List<string>();
+                            foreach (var kvp in _recentStarts)
+                            {
+                                if (now - kvp.Value > _deduplicationWindow)
+                                {
+                                    keysToRemove.Add(kvp.Key);
+                                }
+                            }
+                            foreach (var key in keysToRemove)
+                            {
+                                _recentStarts.Remove(key);
+                            }
+                            
+                            // Check if we've seen this process recently
+                            if (_recentStarts.TryGetValue(processKey, out var lastStartTime))
+                            {
+                                if (now - lastStartTime < _deduplicationWindow)
+                                {
+                                    // Duplicate within deduplication window, skip
+                                    _pendingProcesses.Remove(processId);
+                                    _trackedProcesses.Add(processId); // Still track it so we can create APPLICATION_END
+                                    _logger.LogDebug("Skipping duplicate APPLICATION_START for {ProcessName} (PID: {ProcessId}) - last start was {Seconds}s ago", 
+                                        info.ProcessName, processId, (now - lastStartTime).TotalSeconds);
+                                    return;
+                                }
+                            }
+                            
+                            // Not a duplicate, create the event
+                            _recentStarts[processKey] = now;
+                        }
+                        
                         // Process lived long enough, create APPLICATION_START event
                         _pendingProcesses.Remove(processId);
                         _trackedProcesses.Add(processId);
@@ -250,7 +292,7 @@ public class ProcessMonitor
                         var evt = new AdherenceEvent
                         {
                             EventType = EventTypes.ApplicationStart,
-                            EventTimestampUtc = info.StartTime, // Use original start time
+                            EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(info.StartTime), // Use original start time, converted to Egypt local time
                             NtAccount = ntAccount,
                             ApplicationName = info.ProcessName,
                             ApplicationPath = info.ProcessPath,
@@ -321,7 +363,7 @@ public class ProcessMonitor
             var evt = new AdherenceEvent
             {
                 EventType = EventTypes.ApplicationEnd,
-                EventTimestampUtc = endTime,
+                EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(endTime),
                 NtAccount = ntAccount,
                 ApplicationName = normalizedName,
                 Metadata = new Dictionary<string, object>
@@ -372,7 +414,16 @@ public class ProcessMonitor
             "SupportAssistInstaller", "SupportAssistI", "SupportAssist",
             
             // Other system utilities
-            "cmd", "powershell", "pwsh", "wscript", "cscript", "regsvr32"
+            "cmd", "powershell", "pwsh", "wscript", "cscript", "regsvr32",
+            
+            // Vendor/system apps that should be filtered
+            "msedgewebview2", "MicrosoftEdgeUpdate", "OfficeClickToRun", "msoia",
+            "FortiClient", "FortiTray", "FortiVPN", "FortiSSLVPNdaemon", "FortiSettings", "FCDBLog",
+            "Dell", "DellAWESvc", "DellUCA", "DellTechHub", "DellCoreServices",
+            "IAStorIcon", "IAStorIconLaunch", "IAStorDataMgrSvc",
+            "MathWorksServiceHost", "MathWorksServiceHostMonitor",
+            "WSHelper", "WsToastNotification", "ServiceShell",
+            "TGitCache", "Copilot"
         };
 
         foreach (var skip in skipProcesses)

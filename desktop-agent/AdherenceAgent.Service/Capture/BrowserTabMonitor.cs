@@ -175,7 +175,7 @@ public class BrowserTabMonitor
         var evt = new AdherenceEvent
         {
             EventType = EventTypes.BrowserTabChange,
-            EventTimestampUtc = DateTime.UtcNow,
+            EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
             NtAccount = ntAccount,
             ApplicationName = processName,
             WindowTitle = windowTitle,

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AdherenceAgent.Shared.Configuration;
+using AdherenceAgent.Shared.Helpers;
 using AdherenceAgent.Shared.Models;
 using AdherenceAgent.Shared.Security;
 using AdherenceAgent.Shared.Storage;
@@ -215,7 +216,8 @@ public class UploadService : BackgroundService
             events = events.Select(e => new
             {
                 event_type = e.EventType,
-                event_timestamp = e.EventTimestampUtc,
+                // Format timestamp with Egypt timezone offset to ensure backend correctly interprets it
+                event_timestamp = TimeZoneHelper.ToEgyptLocalTimeIsoString(e.EventTimestampUtc),
                 nt = e.NtAccount,
                 application_name = e.ApplicationName,
                 application_path = e.ApplicationPath,

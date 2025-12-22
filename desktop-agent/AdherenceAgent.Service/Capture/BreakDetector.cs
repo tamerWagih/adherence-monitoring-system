@@ -210,7 +210,7 @@ public class BreakDetector
         await _buffer.AddAsync(new AdherenceEvent
         {
             EventType = EventTypes.BreakStart,
-            EventTimestampUtc = DateTime.UtcNow,
+            EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
             NtAccount = ntAccount,
             Metadata = new Dictionary<string, object>
             {

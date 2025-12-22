@@ -1,5 +1,6 @@
 using System.Data.SQLite;
 using AdherenceAgent.Shared.Configuration;
+using AdherenceAgent.Shared.Helpers;
 using AdherenceAgent.Shared.Models;
 using Microsoft.Extensions.Logging;
 
@@ -226,7 +227,9 @@ public class SQLiteEventBuffer : IEventBuffer
                     VALUES (@type, @timestamp, @ntAccount, @appName, @appPath, @windowTitle, @isWork, @metadata, 'PENDING');
                     """;
                 cmd.Parameters.AddWithValue("@type", adherenceEvent.EventType);
-                cmd.Parameters.AddWithValue("@timestamp", adherenceEvent.EventTimestampUtc.ToString("O"));
+                // Format timestamp with Egypt timezone offset to ensure correct parsing
+                var timestampString = TimeZoneHelper.ToEgyptLocalTimeIsoString(adherenceEvent.EventTimestampUtc);
+                cmd.Parameters.AddWithValue("@timestamp", timestampString);
                 cmd.Parameters.AddWithValue("@ntAccount", adherenceEvent.NtAccount ?? string.Empty);
                 cmd.Parameters.AddWithValue("@appName", (object?)adherenceEvent.ApplicationName ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@appPath", (object?)adherenceEvent.ApplicationPath ?? DBNull.Value);

@@ -70,53 +70,105 @@ public class IdleMonitor
 
             if (!_isIdle && idleTime >= _idleThreshold)
             {
-                _isIdle = true;
-                _idleStartUtc = DateTime.UtcNow - idleTime;
+                // Additional validation: If we have recent activity tracking, double-check before marking as idle
+                // This helps prevent false positives from stale WTS data
+                bool shouldMarkAsIdle = true;
+                if (_lastKnownActiveTime.HasValue)
+                {
+                    var timeSinceLastKnownActive = DateTime.UtcNow - _lastKnownActiveTime.Value;
+                    // If user was active within the last minute, don't mark as idle (WTS data might be stale)
+                    if (timeSinceLastKnownActive < TimeSpan.FromMinutes(1))
+                    {
+                        _logger.LogWarning("WTS reports idle {WtsIdleSeconds}s, but user was active {RecentSeconds}s ago - ignoring idle detection (likely stale WTS data)", 
+                            idleTime.TotalSeconds, timeSinceLastKnownActive.TotalSeconds);
+                        // Reset idleTime to the more recent activity time
+                        idleTime = timeSinceLastKnownActive;
+                        _lastKnownActiveTime = DateTime.UtcNow;
+                        // Don't create IDLE_START event - user is actually active
+                        shouldMarkAsIdle = false;
+                    }
+                }
+                
+                if (shouldMarkAsIdle)
+                {
+                    _isIdle = true;
+                // Set idle start to now (when threshold was crossed), not (now - idleTime)
+                // idleTime can be cumulative from previous sessions if not properly reset,
+                // so using it to calculate start time would be incorrect
+                _idleStartUtc = DateTime.UtcNow;
                 var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
+                
+                // Report actual idle time, but cap at reasonable maximum (1 hour) to avoid showing absurdly large values
+                // This gives accurate information about how long the user was idle before the threshold was crossed
+                // Since we're in the branch where idleTime >= threshold, we know idleTime is at least the threshold
+                var maxReportedSeconds = 3600; // 1 hour max
+                var reportedIdleSeconds = Math.Min((int)idleTime.TotalSeconds, maxReportedSeconds);
+                
                 await _buffer.AddAsync(new AdherenceEvent
                 {
                     EventType = EventTypes.IdleStart,
-                    EventTimestampUtc = DateTime.UtcNow,
+                    EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                     NtAccount = ntAccount,
-                    Metadata = new Dictionary<string, object> { { "idle_seconds", (int)idleTime.TotalSeconds } }
+                    Metadata = new Dictionary<string, object> { { "idle_seconds", reportedIdleSeconds } }
                 }, token);
-                _logger.LogInformation("Idle start detected after {Seconds}s", idleTime.TotalSeconds);
+                    var thresholdSeconds = (int)_idleThreshold.TotalSeconds;
+                    _logger.LogInformation("Idle start detected after {Seconds}s (threshold: {Threshold}s)", idleTime.TotalSeconds, thresholdSeconds);
 
-                // Check for break detection
-                if (_breakDetector != null)
-                {
-                    var totalIdleMinutes = idleTime.TotalMinutes;
-                    _logger.LogDebug("Checking break detection: idleStartUtc={IdleStart}, totalIdleMinutes={TotalMinutes}", 
-                        _idleStartUtc, totalIdleMinutes);
-                    await _breakDetector.CheckBreakStatusAsync(true, _idleStartUtc, totalIdleMinutes);
+                    // Check for break detection
+                    if (_breakDetector != null)
+                    {
+                        var totalIdleMinutes = idleTime.TotalMinutes;
+                        _logger.LogDebug("Checking break detection: idleStartUtc={IdleStart}, totalIdleMinutes={TotalMinutes}", 
+                            _idleStartUtc, totalIdleMinutes);
+                        await _breakDetector.CheckBreakStatusAsync(true, _idleStartUtc, totalIdleMinutes);
+                    }
                 }
             }
             else if (_isIdle && idleTime < _idleThreshold)
             {
                 _isIdle = false;
-                var totalIdle = _idleStartUtc.HasValue ? (DateTime.UtcNow - _idleStartUtc.Value) : idleTime;
-                var totalIdleMinutes = totalIdle.TotalMinutes;
+                
+                // Only create IDLE_END if we have a valid idle start time
+                // This prevents orphaned IDLE_END events (e.g., after service restart or if IDLE_START creation failed)
+                if (_idleStartUtc.HasValue)
+                {
+                    var totalIdle = DateTime.UtcNow - _idleStartUtc.Value;
+                    var totalIdleMinutes = totalIdle.TotalMinutes;
+                    var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
+                    
+                    // Ensure totalIdle is non-negative and reasonable (cap at 24 hours)
+                    var idleSeconds = Math.Max(0, Math.Min((int)totalIdle.TotalSeconds, 86400));
+                    var idleSessionSeconds = Math.Max(0, Math.Min((int)totalIdle.TotalSeconds, 86400));
+                    
+                    await _buffer.AddAsync(new AdherenceEvent
+                    {
+                        EventType = EventTypes.IdleEnd,
+                        EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
+                        NtAccount = ntAccount,
+                        Metadata = new Dictionary<string, object>
+                        {
+                            { "idle_seconds", idleSeconds },
+                            { "idle_session_seconds", idleSessionSeconds }
+                        }
+                    }, token);
+                    _logger.LogInformation("Idle end detected after {Seconds}s (session {SessionSeconds}s)", idleSeconds, idleSessionSeconds);
+
+                    // Check for break detection
+                    if (_breakDetector != null)
+                    {
+                        await _breakDetector.CheckBreakStatusAsync(false, null, 0);
+                    }
+                }
+                else
+                {
+                    // State inconsistency: _isIdle was true but no _idleStartUtc
+                    // This can happen after service restart or if IDLE_START creation failed
+                    // Just reset state without creating IDLE_END event
+                    _logger.LogWarning("Idle state reset without valid start time - skipping IDLE_END event (likely service restart or state inconsistency)");
+                }
+                
                 _idleStartUtc = null;
                 _lastKnownActiveTime = DateTime.UtcNow; // Update last known active time
-                var ntAccount = WindowsIdentityHelper.GetCurrentNtAccount();
-                await _buffer.AddAsync(new AdherenceEvent
-                {
-                    EventType = EventTypes.IdleEnd,
-                    EventTimestampUtc = DateTime.UtcNow,
-                    NtAccount = ntAccount,
-                    Metadata = new Dictionary<string, object>
-                    {
-                        { "idle_seconds", (int)idleTime.TotalSeconds },
-                        { "idle_session_seconds", (int)totalIdle.TotalSeconds }
-                    }
-                }, token);
-                _logger.LogInformation("Idle end detected after {Seconds}s (session {SessionSeconds}s)", idleTime.TotalSeconds, totalIdle.TotalSeconds);
-
-                // Check for break detection
-                if (_breakDetector != null)
-                {
-                    await _breakDetector.CheckBreakStatusAsync(false, null, 0);
-                }
             }
             else if (_isIdle && _breakDetector != null)
             {
@@ -132,8 +184,16 @@ public class IdleMonitor
             }
             
             // Update last known active time if user is active
-            if (!_isIdle && idleTime < _idleThreshold)
+            // Also update if idleTime is less than threshold (even if _isIdle is true, user might have become active)
+            if (idleTime < _idleThreshold)
             {
+                _lastKnownActiveTime = DateTime.UtcNow;
+            }
+            // Also update if we're not idle (regardless of idleTime) - this handles edge cases
+            else if (!_isIdle)
+            {
+                // If we're not idle but idleTime suggests we should be, update last known active time
+                // This helps recover from stale WTS data
                 _lastKnownActiveTime = DateTime.UtcNow;
             }
         }
@@ -226,6 +286,17 @@ public class IdleMonitor
                     var currentTime = DateTime.FromFileTime(wtsInfo.CurrentTime);
                     var idleTime = currentTime - lastInput;
                     
+                    // Validate: LastInputTime should not be in the future
+                    if (lastInput > currentTime)
+                    {
+                        _logger.LogWarning("WTS LastInputTime is in the future (LastInput: {LastInput}, Current: {Current}), using last known active time", lastInput, currentTime);
+                        if (_lastKnownActiveTime.HasValue)
+                        {
+                            return DateTime.UtcNow - _lastKnownActiveTime.Value;
+                        }
+                        return TimeSpan.Zero;
+                    }
+                    
                     // If LastInputTime is suspiciously old (> 1 day), it's likely stale
                     // Use last known active time instead
                     if (idleTime.TotalDays > 1)
@@ -236,6 +307,21 @@ public class IdleMonitor
                             return DateTime.UtcNow - _lastKnownActiveTime.Value;
                         }
                         return TimeSpan.Zero;
+                    }
+                    
+                    // Validate: If we have a recent _lastKnownActiveTime and WTS shows idle time > threshold,
+                    // but _lastKnownActiveTime suggests user was active more recently, trust _lastKnownActiveTime
+                    // This handles cases where WTS data is stale but we've seen activity
+                    if (_lastKnownActiveTime.HasValue && idleTime >= _idleThreshold)
+                    {
+                        var timeSinceLastKnownActive = DateTime.UtcNow - _lastKnownActiveTime.Value;
+                        // If user was active more recently than WTS suggests, use the more recent time
+                        if (timeSinceLastKnownActive < idleTime - TimeSpan.FromSeconds(30))
+                        {
+                            _logger.LogDebug("WTS shows idle {WtsIdleSeconds}s, but user was active {RecentSeconds}s ago - using recent activity time", 
+                                idleTime.TotalSeconds, timeSinceLastKnownActive.TotalSeconds);
+                            return timeSinceLastKnownActive;
+                        }
                     }
                     
                     return idleTime;

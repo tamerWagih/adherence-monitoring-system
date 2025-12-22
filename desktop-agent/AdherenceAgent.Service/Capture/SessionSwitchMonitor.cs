@@ -47,7 +47,7 @@ public class SessionSwitchMonitor
                     await _buffer.AddAsync(new AdherenceEvent
                     {
                         EventType = EventTypes.Logoff,
-                        EventTimestampUtc = DateTime.UtcNow,
+                        EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                         NtAccount = lockNtAccount,
                         Metadata = new Dictionary<string, object>
                         {
@@ -63,7 +63,7 @@ public class SessionSwitchMonitor
                     await _buffer.AddAsync(new AdherenceEvent
                     {
                         EventType = EventTypes.Login,
-                        EventTimestampUtc = DateTime.UtcNow,
+                        EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                         NtAccount = unlockNtAccount,
                         Metadata = new Dictionary<string, object>
                         {

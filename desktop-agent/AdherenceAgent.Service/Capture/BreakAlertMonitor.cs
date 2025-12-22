@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AdherenceAgent.Shared.Configuration;
+using AdherenceAgent.Shared.Helpers;
 using AdherenceAgent.Shared.Models;
 using AdherenceAgent.Shared.Storage;
 using Microsoft.Extensions.Logging;
@@ -125,7 +126,7 @@ public class BreakAlertMonitor
         await _buffer.AddAsync(new AdherenceEvent
         {
             EventType = eventType,
-            EventTimestampUtc = DateTime.UtcNow,
+            EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
             NtAccount = ntAccount,
             Metadata = new Dictionary<string, object>
             {

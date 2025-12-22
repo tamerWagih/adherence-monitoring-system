@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Net.Http;
 using System.Text.Json;
 using AdherenceAgent.Shared.Configuration;
+using AdherenceAgent.Shared.Helpers;
 using AdherenceAgent.Shared.Models;
 using AdherenceAgent.Shared.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -443,7 +444,7 @@ public class TrayAppContext : ApplicationContext
             await buffer.AddAsync(new AdherenceEvent
             {
                 EventType = EventTypes.Login,
-                EventTimestampUtc = DateTime.UtcNow,
+                EventTimestampUtc = TimeZoneHelper.ToEgyptLocalTime(DateTime.UtcNow),
                 Metadata = new Dictionary<string, object> { { "note", "tray_test_event" } }
             }, CancellationToken.None);
 
