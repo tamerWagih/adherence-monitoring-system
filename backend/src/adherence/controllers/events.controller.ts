@@ -7,6 +7,7 @@ import {
   Request,
   HttpCode,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { ThrottleExceptionFilter } from '../../common/filters/throttle-exception.filter';
 import { ThrottlerGuard } from '@nestjs/throttler';
@@ -29,6 +30,8 @@ import { CreateAdherenceEventDto, BatchEventsDto } from '../../dto/create-adhere
 @UseGuards(WorkstationAuthGuard, WorkstationRateLimitGuard, ThrottlerGuard)
 @UseFilters(ThrottleExceptionFilter)
 export class EventsController {
+  private readonly logger = new Logger(EventsController.name);
+
   constructor(
     private eventIngestionService: EventIngestionService,
     private eventIngestionQueue: EventIngestionQueue,
@@ -77,36 +80,58 @@ export class EventsController {
         };
       }
 
-      // Queue entire batch as a single job
-      const jobId = await this.eventIngestionQueue.queueBatchEvents(
-        workstationId,
-        batchDto.events,
-      );
+      try {
+        // Queue entire batch as a single job
+        const jobId = await this.eventIngestionQueue.queueBatchEvents(
+          workstationId,
+          batchDto.events,
+        );
 
-      response.setHeader('X-Job-Id', jobId);
+        response.setHeader('X-Job-Id', jobId);
 
-      return {
-        success: true,
-        message: 'Events queued for processing',
-        events_queued: batchDto.events.length,
-        job_id: jobId,
-      };
+        return {
+          success: true,
+          message: 'Events queued for processing',
+          events_queued: batchDto.events.length,
+          job_id: jobId,
+        };
+      } catch (error) {
+        this.logger.error(`Failed to queue batch events: ${error.message}`, error.stack);
+        response.status(HttpStatus.SERVICE_UNAVAILABLE);
+        return {
+          success: false,
+          message: 'Failed to queue events. Queue service may be unavailable.',
+          events_queued: 0,
+          error: error.message,
+        };
+      }
     } else {
       // Single event
       const eventDto = body as CreateAdherenceEventDto;
-      const jobId = await this.eventIngestionQueue.queueEvent(
-        workstationId,
-        eventDto,
-      );
+      try {
+        const jobId = await this.eventIngestionQueue.queueEvent(
+          workstationId,
+          eventDto,
+        );
 
-      response.setHeader('X-Job-Id', jobId);
+        response.setHeader('X-Job-Id', jobId);
 
-      return {
-        success: true,
-        message: 'Event queued for processing',
-        events_queued: 1,
-        job_id: jobId,
-      };
+        return {
+          success: true,
+          message: 'Event queued for processing',
+          events_queued: 1,
+          job_id: jobId,
+        };
+      } catch (error) {
+        this.logger.error(`Failed to queue event: ${error.message}`, error.stack);
+        response.status(HttpStatus.SERVICE_UNAVAILABLE);
+        return {
+          success: false,
+          message: 'Failed to queue event. Queue service may be unavailable.',
+          events_queued: 0,
+          error: error.message,
+        };
+      }
     }
   }
 }

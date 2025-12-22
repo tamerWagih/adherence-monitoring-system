@@ -40,30 +40,44 @@ export class EventIngestionQueue {
     workstationId: string,
     event: CreateAdherenceEventDto,
   ): Promise<string> {
-    const job = await this.eventQueue.add(
-      'ingest-event',
-      {
-        workstationId,
-        event,
-      },
-      {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000,
-        },
-        removeOnComplete: {
-          age: 3600, // Keep completed jobs for 1 hour
-          count: 5000, // Keep last 5000 completed jobs
-        },
-        removeOnFail: {
-          age: 86400, // Keep failed jobs for 24 hours
-        },
-      },
-    );
+    try {
+      // Add timeout to prevent hanging if Redis is unavailable
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Queue operation timeout')), 5000);
+      });
 
-    this.logger.debug(`Queued event job ${job.id} for workstation ${workstationId}`);
-    return job.id!;
+      const job = await Promise.race([
+        this.eventQueue.add(
+          'ingest-event',
+          {
+            workstationId,
+            event,
+          },
+          {
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 2000,
+            },
+            removeOnComplete: {
+              age: 3600, // Keep completed jobs for 1 hour
+              count: 5000, // Keep last 5000 completed jobs
+            },
+            removeOnFail: {
+              age: 86400, // Keep failed jobs for 24 hours
+            },
+          },
+        ),
+        timeoutPromise,
+      ]);
+
+      this.logger.debug(`Queued event job ${job.id} for workstation ${workstationId}`);
+      return job.id!;
+    } catch (error) {
+      this.logger.error(`Failed to queue event: ${error.message}`);
+      // Re-throw to let controller handle (will return 500 error)
+      throw error;
+    }
   }
 
   /**
@@ -84,34 +98,48 @@ export class EventIngestionQueue {
       throw new Error('Cannot queue empty batch');
     }
 
-    // Queue entire batch as a single job for better performance
-    const job = await this.eventQueue.add(
-      'ingest-batch',
-      {
-        workstationId,
-        events,
-      },
-      {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000,
-        },
-        removeOnComplete: {
-          age: 3600, // Keep completed jobs for 1 hour
-          count: 5000, // Keep last 5000 completed jobs
-        },
-        removeOnFail: {
-          age: 86400, // Keep failed jobs for 24 hours
-          count: 10000, // Keep last 10000 failed jobs
-        },
-      },
-    );
+    try {
+      // Add timeout to prevent hanging if Redis is unavailable
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Queue operation timeout')), 5000);
+      });
 
-    this.logger.debug(
-      `Queued batch job ${job.id} with ${events.length} events for workstation ${workstationId}`,
-    );
-    return job.id!;
+      // Queue entire batch as a single job for better performance
+      const job = await Promise.race([
+        this.eventQueue.add(
+          'ingest-batch',
+          {
+            workstationId,
+            events,
+          },
+          {
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 2000,
+            },
+            removeOnComplete: {
+              age: 3600, // Keep completed jobs for 1 hour
+              count: 5000, // Keep last 5000 completed jobs
+            },
+            removeOnFail: {
+              age: 86400, // Keep failed jobs for 24 hours
+              count: 10000, // Keep last 10000 failed jobs
+            },
+          },
+        ),
+        timeoutPromise,
+      ]);
+
+      this.logger.debug(
+        `Queued batch job ${job.id} with ${events.length} events for workstation ${workstationId}`,
+      );
+      return job.id!;
+    } catch (error) {
+      this.logger.error(`Failed to queue batch events: ${error.message}`);
+      // Re-throw to let controller handle (will return 500 error)
+      throw error;
+    }
   }
 
   /**

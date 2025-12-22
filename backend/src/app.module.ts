@@ -132,6 +132,14 @@ import { RedisModule } from './common/redis.module';
 
         return {
           connection,
+          // Add connection options to prevent blocking
+          defaultJobOptions: {
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 2000,
+            },
+          },
         };
       },
       inject: [ConfigService],
