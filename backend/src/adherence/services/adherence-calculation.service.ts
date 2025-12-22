@@ -321,21 +321,24 @@ export class AdherenceCalculationService {
     const EXTENDED_BREAK_THRESHOLD = 5; // minutes
 
     for (const scheduled of scheduledBreaks) {
-      // Find matching actual break (within scheduled window)
+      // Find matching actual break (starts within scheduled window)
+      // Extended breaks (ending after scheduled end) still count as matched
       const scheduledStart = this.parseTimeToDate(scheduleDate, scheduled.start);
       const scheduledEnd = this.parseTimeToDate(scheduleDate, scheduled.end);
 
       const matchingBreak = actualBreaks.find((actual) => {
+        // Break matches if it starts within the scheduled window
+        // and has at least the minimum duration (allowing for short breaks)
         return (
           actual.start >= scheduledStart &&
-          actual.end <= scheduledEnd &&
+          actual.start <= scheduledEnd &&
           actual.duration_minutes >= scheduled.duration_minutes - EXTENDED_BREAK_THRESHOLD
         );
       });
 
       if (matchingBreak) {
         matchedBreaks++;
-        // Check if extended
+        // Check if extended (duration exceeds scheduled + threshold)
         if (matchingBreak.duration_minutes > scheduled.duration_minutes + EXTENDED_BREAK_THRESHOLD) {
           extendedBreaks++;
         }
