@@ -293,7 +293,22 @@ public class SQLiteEventBuffer : IEventBuffer
                 """;
             await resetCmd.ExecuteNonQueryAsync(cancellationToken);
 
+            // Reset retry_count for FAILED records that have been stuck for more than 1 hour
+            // This gives them another chance to be retried (handles cases where retry_count hit max due to transient failures)
+            var resetFailedCmd = connection.CreateCommand();
+            resetFailedCmd.Transaction = transaction;
+            resetFailedCmd.CommandText = """
+                UPDATE event_buffer
+                SET retry_count = 0, status = 'PENDING'
+                WHERE status = 'FAILED'
+                  AND retry_count >= @maxRetry
+                  AND datetime(created_at) < datetime('now', '-1 hour');
+                """;
+            resetFailedCmd.Parameters.AddWithValue("@maxRetry", maxRetryAttempts);
+            await resetFailedCmd.ExecuteNonQueryAsync(cancellationToken);
+
             // Now select the events we want to process
+            // Prioritize FAILED events over PENDING, and process oldest FAILED events first
             var selectCmd = connection.CreateCommand();
             selectCmd.Transaction = transaction;
             selectCmd.CommandText = """
@@ -301,7 +316,7 @@ public class SQLiteEventBuffer : IEventBuffer
                 FROM event_buffer
                 WHERE status IN ('PENDING','FAILED')
                   AND retry_count < @maxRetry
-                ORDER BY created_at DESC
+                ORDER BY CASE WHEN status = 'FAILED' THEN 0 ELSE 1 END, created_at ASC
                 LIMIT @batchSize;
                 """;
             selectCmd.Parameters.AddWithValue("@batchSize", batchSize);
@@ -431,16 +446,21 @@ public class SQLiteEventBuffer : IEventBuffer
         using var connection = new SQLiteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
+        // Don't consume retry attempts for transient failures; keep retrying indefinitely.
+        // Permanent-ish failures (e.g. upload_failed, unmapped_nt_account) still increment retry_count.
+        var increment = (error == "network_error" || error == "rate_limited") ? 0 : 1;
+
         foreach (var id in ids)
         {
             var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 UPDATE event_buffer
                 SET status = 'FAILED',
-                    retry_count = retry_count + 1,
+                    retry_count = retry_count + @inc,
                     error_message = @error
                 WHERE id = @id;
                 """;
+            cmd.Parameters.AddWithValue("@inc", increment);
             cmd.Parameters.AddWithValue("@error", error);
             cmd.Parameters.AddWithValue("@id", id);
             await cmd.ExecuteNonQueryAsync(cancellationToken);

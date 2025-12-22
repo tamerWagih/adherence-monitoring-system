@@ -63,11 +63,12 @@ export class AdherenceModule {}
  * Note on Rate Limiting:
  * 
  * Global rate limiting is configured in AppModule (1000 req/min).
- * Per-workstation rate limiting (10 req/min per workstation) will be
- * implemented in Week 5 using:
- * - Custom throttler storage (Redis-based) with workstation_id as key
- * - Or custom guard that checks rate limits per workstation
+ * Per-workstation rate limiting (10 req/min per workstation) is implemented
+ * using WorkstationRateLimitGuard with Redis-based storage.
  * 
- * For now, global rate limiting is sufficient for Week 2.
+ * Rate limiting order:
+ * 1. WorkstationAuthGuard - validates API key and workstation ID
+ * 2. WorkstationRateLimitGuard - enforces per-workstation rate limit (10 req/min)
+ * 3. ThrottlerGuard - enforces global rate limit (1000 req/min)
  */
 

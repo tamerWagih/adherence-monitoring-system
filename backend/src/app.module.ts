@@ -8,9 +8,11 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AdherenceModule } from './adherence/adherence.module';
 import { AdminModule } from './admin/admin.module';
+import { RedisModule } from './common/redis.module';
 
 @Module({
   imports: [
+    RedisModule, // Redis for rate limiting and queues
     AdherenceModule,
     AdminModule,
     // Configuration Module

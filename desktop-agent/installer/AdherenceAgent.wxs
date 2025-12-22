@@ -25,6 +25,9 @@
              Keywords="Adherence,Monitoring,Agent"
              Manufacturer="$(var.Manufacturer)" />
 
+    <!-- Ensure correct admin detection under UAC (helps avoid confusing admin-required failures) -->
+    <Property Id="MSIUSEREALADMINDETECTION" Value="1" />
+
     <!-- MajorUpgrade: Remove old version before installing new -->
     <!-- Schedule: RemoveExistingProducts after InstallValidate to ensure old files are removed before new ones are installed -->
     <MajorUpgrade 
@@ -126,8 +129,9 @@
       <!-- This prevents watchdog from restarting tray during upgrade/uninstall -->
       <Custom Action="KillTray_SetProperty" After="StopServices"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
       <Custom Action="KillTray" After="KillTray_SetProperty"><![CDATA[UPGRADINGPRODUCTCODE OR REMOVE="ALL"]]></Custom>
-      
+
       <!-- Set service ACL and recovery on install/upgrade -->
+      <!-- Service exists after InstallServices, and Return="ignore" handles any errors gracefully -->
       <Custom Action="SetServiceAcl_SetProperty" After="InstallServices"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
       <Custom Action="SetServiceAcl" After="SetServiceAcl_SetProperty"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>
       <Custom Action="SetServiceRecovery_SetProperty" After="InstallServices"><![CDATA[NOT Installed OR UPGRADINGPRODUCTCODE]]></Custom>

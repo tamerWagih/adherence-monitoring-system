@@ -3,13 +3,16 @@ import {
   Post,
   Body,
   UseGuards,
+  UseFilters,
   Request,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { ThrottleExceptionFilter } from '../../common/filters/throttle-exception.filter';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { EventIngestionService } from '../services/event-ingestion.service';
 import { WorkstationAuthGuard } from '../../guards/workstation-auth.guard';
+import { WorkstationRateLimitGuard } from '../../guards/workstation-rate-limit.guard';
 import { CreateAdherenceEventDto, BatchEventsDto } from '../../dto/create-adherence-event.dto';
 
 /**
@@ -19,7 +22,8 @@ import { CreateAdherenceEventDto, BatchEventsDto } from '../../dto/create-adhere
  * Protected by WorkstationAuthGuard (API key authentication).
  */
 @Controller('events')
-@UseGuards(WorkstationAuthGuard, ThrottlerGuard)
+@UseGuards(WorkstationAuthGuard, WorkstationRateLimitGuard, ThrottlerGuard)
+@UseFilters(ThrottleExceptionFilter)
 export class EventsController {
   constructor(private eventIngestionService: EventIngestionService) {}
 

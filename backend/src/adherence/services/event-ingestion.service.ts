@@ -92,8 +92,30 @@ export class EventIngestionService {
    * 
    * Each event must have an NT account. Events with unmapped NT accounts
    * will be rejected (409 Conflict) and counted as failed.
+   * 
+   * Uses bulk insert optimization for batches > 10 events.
    */
   async ingestBatchEvents(
+    workstationId: string,
+    events: CreateAdherenceEventDto[],
+  ): Promise<{ processed: number; failed: number }> {
+    if (events.length === 0) {
+      return { processed: 0, failed: 0 };
+    }
+
+    // For small batches (< 10 events), use individual saves
+    // For large batches (>= 10 events), use bulk insert optimization
+    if (events.length < 10) {
+      return this.ingestBatchEventsIndividual(workstationId, events);
+    }
+
+    return this.ingestBatchEventsBulk(workstationId, events);
+  }
+
+  /**
+   * Ingest batch events individually (for small batches)
+   */
+  private async ingestBatchEventsIndividual(
     workstationId: string,
     events: CreateAdherenceEventDto[],
   ): Promise<{ processed: number; failed: number }> {
@@ -117,6 +139,111 @@ export class EventIngestionService {
     }
 
     return { processed, failed };
+  }
+
+  /**
+   * Ingest batch events using bulk insert optimization
+   * 
+   * Groups events by NT account, resolves employee IDs in batch,
+   * then performs bulk insert for better performance.
+   */
+  private async ingestBatchEventsBulk(
+    workstationId: string,
+    events: CreateAdherenceEventDto[],
+  ): Promise<{ processed: number; failed: number }> {
+    // Step 1: Validate all events and resolve employee IDs
+    const validEvents: AgentAdherenceEvent[] = [];
+    const failedEvents: CreateAdherenceEventDto[] = [];
+    const ntToEmployeeIdMap = new Map<string, string>();
+
+    // Collect unique NT accounts
+    const uniqueNts = [...new Set(events.map(e => e.nt).filter(Boolean))];
+
+    // Resolve all NT accounts in batch
+    for (const nt of uniqueNts) {
+      try {
+        const employeeId = await this.resolveEmployeeIdFromNt(nt);
+        ntToEmployeeIdMap.set(nt, employeeId);
+      } catch (error) {
+        // NT not mapped - mark all events with this NT as failed
+        this.logger.warn(`Failed to resolve NT account: ${nt}`);
+      }
+    }
+
+    // Step 2: Create event entities for valid events
+    for (const eventDto of events) {
+      try {
+        // Validate NT is present
+        if (!eventDto.nt) {
+          failedEvents.push(eventDto);
+          continue;
+        }
+
+        // Check if NT is mapped
+        const employeeId = ntToEmployeeIdMap.get(eventDto.nt);
+        if (!employeeId) {
+          failedEvents.push(eventDto);
+          continue;
+        }
+
+        // Support both 'timestamp' and 'event_timestamp' field names
+        const timestamp = eventDto.event_timestamp || eventDto.timestamp;
+        if (!timestamp) {
+          failedEvents.push(eventDto);
+          continue;
+        }
+
+        const eventDate = new Date(timestamp);
+        if (isNaN(eventDate.getTime())) {
+          failedEvents.push(eventDto);
+          continue;
+        }
+
+        // Create event entity
+        const event = this.eventRepo.create({
+          id: randomUUID(),
+          employeeId,
+          nt: eventDto.nt,
+          workstationId,
+          eventType: eventDto.event_type,
+          eventTimestamp: eventDate,
+          applicationName: eventDto.application_name,
+          applicationPath: eventDto.application_path,
+          windowTitle: eventDto.window_title,
+          isWorkApplication: eventDto.is_work_application,
+          metadata: eventDto.metadata || {},
+        });
+
+        validEvents.push(event);
+      } catch (error) {
+        failedEvents.push(eventDto);
+        this.logger.error(`Failed to create event entity: ${error.message}`, error.stack);
+      }
+    }
+
+    // Step 3: Bulk insert valid events
+    if (validEvents.length > 0) {
+      try {
+        await this.eventRepo.save(validEvents);
+        this.logger.log(`Bulk inserted ${validEvents.length} events`);
+      } catch (error) {
+        // If bulk insert fails, fall back to individual saves
+        this.logger.warn(`Bulk insert failed, falling back to individual saves: ${error.message}`);
+        for (const event of validEvents) {
+          try {
+            await this.eventRepo.save(event);
+          } catch (saveError) {
+            failedEvents.push(events[validEvents.indexOf(event)]);
+            this.logger.error(`Failed to save event: ${saveError.message}`);
+          }
+        }
+      }
+    }
+
+    return {
+      processed: validEvents.length,
+      failed: failedEvents.length,
+    };
   }
 }
 
