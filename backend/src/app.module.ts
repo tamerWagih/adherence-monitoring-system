@@ -168,8 +168,10 @@ import { RedisModule } from './common/redis.module';
               port: redisPort,
               password: redisPassword,
               connectTimeout: 5000,
-              commandTimeout: 5000,
-              lazyConnect: true,
+              commandTimeout: 3000,
+              lazyConnect: false, // Connect immediately
+              maxRetriesPerRequest: 1,
+              enableOfflineQueue: true,
             };
           }
         } else {
