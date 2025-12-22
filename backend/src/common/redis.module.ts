@@ -20,34 +20,59 @@ import Redis from 'ioredis';
         const redisPassword = configService.get<string>('REDIS_PASSWORD');
         const redisUrl = configService.get<string>('REDIS_URL');
 
-        // Use REDIS_URL if provided (format: redis://[:password@]host[:port])
-        // Otherwise construct from host/port/password
-        const connectionOptions: any = redisUrl
-          ? redisUrl
-          : {
-              host: redisHost,
-              port: redisPort,
-              ...(redisPassword && { password: redisPassword }),
-              retryStrategy: (times: number) => {
-                const delay = Math.min(times * 50, 2000);
-                return delay;
-              },
-              maxRetriesPerRequest: 3,
-              enableReadyCheck: true,
-              lazyConnect: true,
-            };
+        // Build connection options
+        let connectionOptions: any;
+        
+        if (redisUrl) {
+          // If REDIS_URL is provided, check if it includes password
+          // Format: redis://[:password@]host[:port]
+          // Check if URL has password (contains @ after redis://)
+          const hasPasswordInUrl = redisUrl.match(/^redis:\/\/[^:]+:[^@]+@/);
+          
+          if (redisPassword && !hasPasswordInUrl) {
+            // REDIS_URL doesn't include password, add it
+            // Parse URL: redis://host:port -> redis://:password@host:port
+            const urlMatch = redisUrl.match(/^redis:\/\/([^:]+)(?::(\d+))?$/);
+            if (urlMatch) {
+              const host = urlMatch[1];
+              const port = urlMatch[2] || redisPort;
+              // URL encode password in case it contains special characters
+              connectionOptions = `redis://:${encodeURIComponent(redisPassword)}@${host}:${port}`;
+            } else {
+              // Fallback: use REDIS_URL as-is and add password as option
+              connectionOptions = {
+                host: redisHost,
+                port: redisPort,
+                password: redisPassword,
+              };
+            }
+          } else {
+            // REDIS_URL already includes password or no password needed
+            connectionOptions = redisUrl;
+          }
+        } else {
+          // Construct from individual settings
+          connectionOptions = {
+            host: redisHost,
+            port: redisPort,
+            ...(redisPassword && { password: redisPassword }),
+          };
+        }
+
+        // Common options for all connections
+        const commonOptions = {
+          retryStrategy: (times: number) => {
+            const delay = Math.min(times * 50, 2000);
+            return delay;
+          },
+          maxRetriesPerRequest: 3,
+          enableReadyCheck: true,
+          lazyConnect: true,
+        };
 
         const client = typeof connectionOptions === 'string'
-          ? new Redis(connectionOptions, {
-              retryStrategy: (times: number) => {
-                const delay = Math.min(times * 50, 2000);
-                return delay;
-              },
-              maxRetriesPerRequest: 3,
-              enableReadyCheck: true,
-              lazyConnect: true,
-            })
-          : new Redis(connectionOptions);
+          ? new Redis(connectionOptions, commonOptions)
+          : new Redis({ ...connectionOptions, ...commonOptions });
 
         client.on('error', (err) => {
           console.error('Redis Client Error:', err);

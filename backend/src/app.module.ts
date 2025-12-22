@@ -92,13 +92,43 @@ import { RedisModule } from './common/redis.module';
         const redisPassword = configService.get<string>('REDIS_PASSWORD');
         const redisUrl = configService.get<string>('REDIS_URL');
 
-        const connection: any = redisUrl
-          ? redisUrl
-          : {
-              host: redisHost,
-              port: redisPort,
-              ...(redisPassword && { password: redisPassword }),
-            };
+        let connection: any;
+        
+        if (redisUrl) {
+          // If REDIS_URL is provided, check if it includes password
+          // Format: redis://[:password@]host[:port]
+          // Check if URL has password (contains @ after redis://)
+          const hasPasswordInUrl = redisUrl.match(/^redis:\/\/[^:]+:[^@]+@/);
+          
+          if (redisPassword && !hasPasswordInUrl) {
+            // REDIS_URL doesn't include password, add it
+            // Parse URL: redis://host:port -> redis://:password@host:port
+            const urlMatch = redisUrl.match(/^redis:\/\/([^:]+)(?::(\d+))?$/);
+            if (urlMatch) {
+              const host = urlMatch[1];
+              const port = urlMatch[2] || redisPort;
+              // URL encode password in case it contains special characters
+              connection = `redis://:${encodeURIComponent(redisPassword)}@${host}:${port}`;
+            } else {
+              // Fallback: use individual settings
+              connection = {
+                host: redisHost,
+                port: redisPort,
+                password: redisPassword,
+              };
+            }
+          } else {
+            // REDIS_URL already includes password or no password needed
+            connection = redisUrl;
+          }
+        } else {
+          // Construct from individual settings
+          connection = {
+            host: redisHost,
+            port: redisPort,
+            ...(redisPassword && { password: redisPassword }),
+          };
+        }
 
         return {
           connection,
