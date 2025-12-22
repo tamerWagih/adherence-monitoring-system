@@ -215,6 +215,20 @@
                         Remove="uninstall"
                         Wait="yes" />
       </Component>
+
+      <!-- Cleanup: remove any leftover files in ServiceFolder on uninstall.
+           Prevents Error 2911 when extra files exist that were not installed by MSI. -->
+      <Component Id="ServiceFolderCleanup" Guid="1E2D3C4B-5A69-4C8D-9E0F-1029384756AA">
+        <CreateFolder />
+        <RemoveFile Id="RemoveServiceFolderFiles" Name="*.*" On="uninstall" />
+        <RemoveFolder Id="RemoveServiceFolder" On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\OctopusWFM\AdherenceAgent"
+                       Name="ServiceFolderCleanup"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
     </ComponentGroup>
   </Fragment>
 
@@ -231,6 +245,20 @@
         <File Id="TrayConfigFile"
               Source="$(var.TrayBinPath)\appsettings.json"
               KeyPath="yes" />
+      </Component>
+
+      <!-- Cleanup: remove any leftover files in TrayFolder on uninstall.
+           Prevents Error 2911 when extra files exist that were not installed by MSI. -->
+      <Component Id="TrayFolderCleanup" Guid="6D5C4B3A-2918-4706-A9D7-8E8A9B0C1D2E">
+        <CreateFolder />
+        <RemoveFile Id="RemoveTrayFolderFiles" Name="*.*" On="uninstall" />
+        <RemoveFolder Id="RemoveTrayFolder" On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\OctopusWFM\AdherenceAgent"
+                       Name="TrayFolderCleanup"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
       </Component>
     </ComponentGroup>
   </Fragment>
