@@ -63,8 +63,6 @@ export class SummariesService {
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
       .leftJoinAndSelect('summary.employee', 'employee')
-      // Join with departments table - use alias 'employee' and column name 'department_id'
-      .leftJoin('departments', 'department', 'department.id = employee.department_id')
       .orderBy('summary.scheduleDate', 'DESC')
       .addOrderBy('employee.fullNameEn', 'ASC');
 
@@ -131,12 +129,16 @@ export class SummariesService {
       });
     }
 
-    // Department filter (via employee join with departments table)
+    // Department filter - use subquery to avoid join issues
     if (query.department) {
-      // Join with departments table and filter by department name
-      qb.andWhere('department.name = :department', {
-        department: query.department,
-      });
+      qb.andWhere(
+        `summary.employee_id IN (
+          SELECT e.id FROM employees e
+          INNER JOIN departments d ON d.id = e.department_id
+          WHERE d.name = :department
+        )`,
+        { department: query.department },
+      );
     }
 
     // Adherence percentage filters
