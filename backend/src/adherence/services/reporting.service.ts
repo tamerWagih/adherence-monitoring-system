@@ -180,18 +180,19 @@ export class ReportingService {
     weekEnd: string, // YYYY-MM-DD
     department?: string,
   ): Promise<WeeklyReportResponse> {
-    this.logger.debug(`Generating weekly report from ${weekStart} to ${weekEnd}`);
+    this.logger.debug(`Generating weekly report from ${weekStart} to ${weekEnd}, department: ${department || 'all'}`);
 
     // Build query for summaries in date range
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
       .leftJoinAndSelect('summary.employee', 'employee')
-      .leftJoin('departments', 'department', 'department.id = employee.department_id')
       .where('summary.scheduleDate >= :weekStart', { weekStart })
       .andWhere('summary.scheduleDate <= :weekEnd', { weekEnd });
 
+    // Add department join and filter if department is specified
     if (department) {
-      qb.andWhere('department.name = :department', { department });
+      qb.leftJoin('departments', 'department', 'department.id = employee.department_id')
+        .andWhere('department.name = :department', { department });
     }
 
     const summaries = await qb.getMany();
