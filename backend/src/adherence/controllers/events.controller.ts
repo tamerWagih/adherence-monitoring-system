@@ -8,6 +8,7 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ThrottleExceptionFilter } from '../../common/filters/throttle-exception.filter';
@@ -71,14 +72,19 @@ export class EventsController {
   @ApiResponse({ status: 401, description: 'Invalid workstation credentials' })
   @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   async ingestEvents(
-    @Body() body: CreateAdherenceEventDto | BatchEventsDto,
     @Request() req: any,
+    @Body() body?: CreateAdherenceEventDto | BatchEventsDto,
   ) {
     const workstationId = req.workstation.workstationId;
     const response = req.res;
 
     // Set header to indicate queue mode
     response.setHeader('X-Queue-Mode', 'true');
+
+    // Guard against empty/missing body (prevents 500 due to `'events' in undefined`)
+    if (!body) {
+      throw new BadRequestException('Request body is required');
+    }
 
     // Check if it's a batch request
     if ('events' in body && Array.isArray(body.events)) {
