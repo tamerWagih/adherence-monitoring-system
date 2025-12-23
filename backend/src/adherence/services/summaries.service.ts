@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder, Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { AgentAdherenceSummary } from '../../entities/agent-adherence-summary.entity';
 import { Employee } from '../../entities/employee.entity';
+import { CacheService } from '../../common/cache.service';
 
 /**
  * Query DTO for summaries
@@ -49,60 +50,87 @@ export class SummariesService {
     private summaryRepo: Repository<AgentAdherenceSummary>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
+    private cacheService: CacheService,
   ) {}
 
   /**
    * Get summaries with filters and pagination
+   * Uses Redis caching for performance
    */
   async getSummaries(query: SummariesQueryDto): Promise<PaginatedResponse<any>> {
     const page = Math.max(1, query.page || this.DEFAULT_PAGE);
     const limit = Math.min(this.MAX_LIMIT, Math.max(1, query.limit || this.DEFAULT_LIMIT));
     const skip = (page - 1) * limit;
 
-    // Build query builder
-    const qb = this.summaryRepo
-      .createQueryBuilder('summary')
-      .leftJoinAndSelect('summary.employee', 'employee')
-      .orderBy('summary.scheduleDate', 'DESC')
-      .addOrderBy('employee.fullNameEn', 'ASC');
+    // Determine TTL based on date range
+    // Today's data: 5 minutes (changes frequently)
+    // Historical data: 15 minutes (rarely changes)
+    const today = new Date().toISOString().split('T')[0];
+    const isTodayData = query.startDate === today || query.endDate === today || 
+                       (!query.startDate && !query.endDate);
+    const ttlSeconds = isTodayData ? 300 : 900; // 5 min or 15 min
 
-    // Apply filters
-    this.applyFilters(qb, query);
+    return this.cacheService.getOrSet(
+      'summaries',
+      'list',
+      query,
+      async () => {
+        // Build query builder
+        const qb = this.summaryRepo
+          .createQueryBuilder('summary')
+          .leftJoinAndSelect('summary.employee', 'employee')
+          .orderBy('summary.scheduleDate', 'DESC')
+          .addOrderBy('employee.fullNameEn', 'ASC');
 
-    // Get total count
-    const total = await qb.getCount();
+        // Apply filters
+        this.applyFilters(qb, query);
 
-    // Apply pagination
-    const summaries = await qb.skip(skip).take(limit).getMany();
+        // Get total count
+        const total = await qb.getCount();
 
-    // Transform to response format
-    const data = summaries.map((summary) => this.transformSummary(summary));
+        // Apply pagination
+        const summaries = await qb.skip(skip).take(limit).getMany();
 
-    return {
-      data,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+        // Transform to response format
+        const data = summaries.map((summary) => this.transformSummary(summary));
+
+        return {
+          data,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+          },
+        };
       },
-    };
+      ttlSeconds,
+    );
   }
 
   /**
    * Get a single summary by ID
+   * Uses Redis caching for performance
    */
   async getSummaryById(id: string): Promise<any> {
-    const summary = await this.summaryRepo.findOne({
-      where: { id },
-      relations: ['employee'],
-    });
+    return this.cacheService.getOrSet(
+      'summaries',
+      'byId',
+      { id },
+      async () => {
+        const summary = await this.summaryRepo.findOne({
+          where: { id },
+          relations: ['employee'],
+        });
 
-    if (!summary) {
-      return null;
-    }
+        if (!summary) {
+          return null;
+        }
 
-    return this.transformSummary(summary);
+        return this.transformSummary(summary);
+      },
+      900, // 15 minutes TTL
+    );
   }
 
   /**

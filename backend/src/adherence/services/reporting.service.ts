@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { AgentAdherenceSummary } from '../../entities/agent-adherence-summary.entity';
 import { Employee } from '../../entities/employee.entity';
+import { CacheService } from '../../common/cache.service';
 
 /**
  * Daily Report Response
@@ -92,10 +93,12 @@ export class ReportingService {
     private summaryRepo: Repository<AgentAdherenceSummary>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
+    private cacheService: CacheService,
   ) {}
 
   /**
    * Generate daily adherence report
+   * Uses Redis caching for performance
    */
   async generateDailyReport(
     date: string, // YYYY-MM-DD
@@ -103,46 +106,58 @@ export class ReportingService {
   ): Promise<DailyReportResponse> {
     this.logger.debug(`Generating daily report for ${date}, department: ${department || 'all'}`);
 
-    // Build query for summaries on the date
-    const qb = this.summaryRepo
-      .createQueryBuilder('summary')
-      .leftJoinAndSelect('summary.employee', 'employee')
-      .where('summary.scheduleDate = :date', { date });
+    // Determine TTL: today's report = 15 min, historical = 30 min
+    const today = new Date().toISOString().split('T')[0];
+    const ttlSeconds = date === today ? 900 : 1800; // 15 min or 30 min
 
-    // Add department filter if specified
-    // Use WHERE clause with subquery to avoid join conflicts
-    if (department) {
-      qb.andWhere(
-        `summary.employee_id IN (
-          SELECT e.id 
-          FROM employees e
-          INNER JOIN departments d ON d.id = e.department_id
-          WHERE d.name = :department
-        )`,
-        { department },
-      );
-    }
+    return this.cacheService.getOrSet(
+      'reports',
+      'daily',
+      { date, department },
+      async () => {
+        // Build query for summaries on the date
+        const qb = this.summaryRepo
+          .createQueryBuilder('summary')
+          .leftJoinAndSelect('summary.employee', 'employee')
+          .where('summary.scheduleDate = :date', { date });
 
-    // Log the SQL query for debugging
-    const sql = qb.getSql();
-    const params = qb.getParameters();
-    this.logger.debug(`SQL Query: ${sql}`);
-    this.logger.debug(`Query Parameters: ${JSON.stringify(params)}`);
-    
-    this.logger.debug(`Executing query for daily report`);
-    const startTime = Date.now();
-    try {
-      const summaries = await qb.getMany();
-      const queryTime = Date.now() - startTime;
-      this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for date ${date}`);
-      return this.buildDailyReportResponse(date, summaries, department);
-    } catch (error) {
-      const queryTime = Date.now() - startTime;
-      this.logger.error(`Query failed after ${queryTime}ms: ${error.message}`);
-      this.logger.error(`Failed SQL: ${sql}`);
-      this.logger.error(`Failed Parameters: ${JSON.stringify(params)}`);
-      throw error;
-    }
+        // Add department filter if specified
+        // Use WHERE clause with subquery to avoid join conflicts
+        if (department) {
+          qb.andWhere(
+            `summary.employee_id IN (
+              SELECT e.id 
+              FROM employees e
+              INNER JOIN departments d ON d.id = e.department_id
+              WHERE d.name = :department
+            )`,
+            { department },
+          );
+        }
+
+        // Log the SQL query for debugging
+        const sql = qb.getSql();
+        const params = qb.getParameters();
+        this.logger.debug(`SQL Query: ${sql}`);
+        this.logger.debug(`Query Parameters: ${JSON.stringify(params)}`);
+        
+        this.logger.debug(`Executing query for daily report`);
+        const startTime = Date.now();
+        try {
+          const summaries = await qb.getMany();
+          const queryTime = Date.now() - startTime;
+          this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for date ${date}`);
+          return this.buildDailyReportResponse(date, summaries, department);
+        } catch (error) {
+          const queryTime = Date.now() - startTime;
+          this.logger.error(`Query failed after ${queryTime}ms: ${error.message}`);
+          this.logger.error(`Failed SQL: ${sql}`);
+          this.logger.error(`Failed Parameters: ${JSON.stringify(params)}`);
+          throw error;
+        }
+      },
+      ttlSeconds,
+    );
   }
 
   /**
@@ -208,6 +223,7 @@ export class ReportingService {
 
   /**
    * Generate weekly adherence report
+   * Uses Redis caching for performance
    */
   async generateWeeklyReport(
     weekStart: string, // YYYY-MM-DD
@@ -216,124 +232,136 @@ export class ReportingService {
   ): Promise<WeeklyReportResponse> {
     this.logger.debug(`Generating weekly report from ${weekStart} to ${weekEnd}, department: ${department || 'all'}`);
 
-    // Build query for summaries in date range
-    const qb = this.summaryRepo
-      .createQueryBuilder('summary')
-      .leftJoinAndSelect('summary.employee', 'employee')
-      .where('summary.scheduleDate >= :weekStart', { weekStart })
-      .andWhere('summary.scheduleDate <= :weekEnd', { weekEnd });
+    // TTL: 30 minutes for weekly reports
+    const ttlSeconds = 1800;
 
-    // Add department filter if specified
-    // Use EXISTS subquery for better performance
-    if (department) {
-      qb.andWhere(
-        `EXISTS (
-          SELECT 1 FROM employees e
-          INNER JOIN departments d ON d.id = e.department_id
-          WHERE e.id = summary.employee_id AND d.name = :department
-        )`,
-        { department },
-      );
-    }
+    return this.cacheService.getOrSet(
+      'reports',
+      'weekly',
+      { weekStart, weekEnd, department },
+      async () => {
+        // Build query for summaries in date range
+        const qb = this.summaryRepo
+          .createQueryBuilder('summary')
+          .leftJoinAndSelect('summary.employee', 'employee')
+          .where('summary.scheduleDate >= :weekStart', { weekStart })
+          .andWhere('summary.scheduleDate <= :weekEnd', { weekEnd });
 
-    this.logger.debug(`Executing query for weekly report`);
-    const startTime = Date.now();
-    const summaries = await qb.getMany();
-    const queryTime = Date.now() - startTime;
-    this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for week ${weekStart} to ${weekEnd}`);
+        // Add department filter if specified
+        // Use EXISTS subquery for better performance
+        if (department) {
+          qb.andWhere(
+            `EXISTS (
+              SELECT 1 FROM employees e
+              INNER JOIN departments d ON d.id = e.department_id
+              WHERE e.id = summary.employee_id AND d.name = :department
+            )`,
+            { department },
+          );
+        }
 
-    // Group by employee and calculate averages
-    const employeeMap = new Map<string, any>();
+        this.logger.debug(`Executing query for weekly report`);
+        const startTime = Date.now();
+        const summaries = await qb.getMany();
+        const queryTime = Date.now() - startTime;
+        this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for week ${weekStart} to ${weekEnd}`);
 
-    summaries.forEach((summary) => {
-      const employeeId = summary.employeeId;
-      if (!employeeMap.has(employeeId)) {
-        employeeMap.set(employeeId, {
-          employeeId,
-          employeeName: summary.employee?.fullNameEn || 'Unknown',
-          hrId: summary.employee?.hrId || null,
-          adherenceValues: [],
-          scheduledMinutes: 0,
-          actualMinutes: 0,
+        // Group by employee and calculate averages
+        const employeeMap = new Map<string, any>();
+
+        summaries.forEach((summary) => {
+          const employeeId = summary.employeeId;
+          if (!employeeMap.has(employeeId)) {
+            employeeMap.set(employeeId, {
+              employeeId,
+              employeeName: summary.employee?.fullNameEn || 'Unknown',
+              hrId: summary.employee?.hrId || null,
+              adherenceValues: [],
+              scheduledMinutes: 0,
+              actualMinutes: 0,
+            });
+          }
+
+          const employeeData = employeeMap.get(employeeId);
+          const adherence = summary.adherencePercentage
+            ? parseFloat(summary.adherencePercentage.toString())
+            : 0;
+          employeeData.adherenceValues.push(adherence);
+          employeeData.scheduledMinutes += summary.scheduledDurationMinutes;
+          employeeData.actualMinutes += summary.actualDurationMinutes;
         });
-      }
 
-      const employeeData = employeeMap.get(employeeId);
-      const adherence = summary.adherencePercentage
-        ? parseFloat(summary.adherencePercentage.toString())
-        : 0;
-      employeeData.adherenceValues.push(adherence);
-      employeeData.scheduledMinutes += summary.scheduledDurationMinutes;
-      employeeData.actualMinutes += summary.actualDurationMinutes;
-    });
+        // Calculate averages per employee
+        const summaryData = Array.from(employeeMap.values()).map((data) => ({
+          employeeId: data.employeeId,
+          employeeName: data.employeeName,
+          hrId: data.hrId,
+          averageAdherence:
+            data.adherenceValues.length > 0
+              ? data.adherenceValues.reduce((a: number, b: number) => a + b, 0) /
+                data.adherenceValues.length
+              : 0,
+          totalScheduledMinutes: data.scheduledMinutes,
+          totalActualMinutes: data.actualMinutes,
+        }));
 
-    // Calculate averages per employee
-    const summaryData = Array.from(employeeMap.values()).map((data) => ({
-      employeeId: data.employeeId,
-      employeeName: data.employeeName,
-      hrId: data.hrId,
-      averageAdherence:
-        data.adherenceValues.length > 0
-          ? data.adherenceValues.reduce((a: number, b: number) => a + b, 0) /
-            data.adherenceValues.length
-          : 0,
-      totalScheduledMinutes: data.scheduledMinutes,
-      totalActualMinutes: data.actualMinutes,
-    }));
+        // Calculate overall average
+        const totalAdherence = summaryData.reduce(
+          (sum, e) => sum + e.averageAdherence,
+          0,
+        );
+        const averageAdherence =
+          summaryData.length > 0 ? totalAdherence / summaryData.length : 0;
 
-    // Calculate overall average
-    const totalAdherence = summaryData.reduce(
-      (sum, e) => sum + e.averageAdherence,
-      0,
+        // Calculate daily averages
+        const dailyAverages: Array<{ date: string; averageAdherence: number; agentsWithData: number }> = [];
+        const startDate = new Date(weekStart);
+        const endDate = new Date(weekEnd);
+
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+          const dateStr = d.toISOString().split('T')[0];
+          const daySummaries = summaries.filter(
+            (s) => {
+              const sDateStr = s.scheduleDate instanceof Date 
+                ? s.scheduleDate.toISOString().split('T')[0]
+                : typeof s.scheduleDate === 'string'
+                ? s.scheduleDate
+                : String(s.scheduleDate);
+              return sDateStr === dateStr;
+            },
+          );
+          const dayAdherence = daySummaries.reduce((sum, s) => {
+            const adherence = s.adherencePercentage
+              ? parseFloat(s.adherencePercentage.toString())
+              : 0;
+            return sum + adherence;
+          }, 0);
+          const dayAverage =
+            daySummaries.length > 0 ? dayAdherence / daySummaries.length : 0;
+
+          dailyAverages.push({
+            date: dateStr,
+            averageAdherence: Math.round(dayAverage * 100) / 100,
+            agentsWithData: daySummaries.length,
+          });
+        }
+
+        return {
+          weekStart,
+          weekEnd,
+          totalAgents: employeeMap.size,
+          averageAdherence: Math.round(averageAdherence * 100) / 100,
+          dailyAverages,
+          summary: summaryData,
+        };
+      },
+      ttlSeconds,
     );
-    const averageAdherence =
-      summaryData.length > 0 ? totalAdherence / summaryData.length : 0;
-
-    // Calculate daily averages
-    const dailyAverages: Array<{ date: string; averageAdherence: number; agentsWithData: number }> = [];
-    const startDate = new Date(weekStart);
-    const endDate = new Date(weekEnd);
-
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split('T')[0];
-      const daySummaries = summaries.filter(
-        (s) => {
-          const sDateStr = s.scheduleDate instanceof Date 
-            ? s.scheduleDate.toISOString().split('T')[0]
-            : typeof s.scheduleDate === 'string'
-            ? s.scheduleDate
-            : String(s.scheduleDate);
-          return sDateStr === dateStr;
-        },
-      );
-      const dayAdherence = daySummaries.reduce((sum, s) => {
-        const adherence = s.adherencePercentage
-          ? parseFloat(s.adherencePercentage.toString())
-          : 0;
-        return sum + adherence;
-      }, 0);
-      const dayAverage =
-        daySummaries.length > 0 ? dayAdherence / daySummaries.length : 0;
-
-      dailyAverages.push({
-        date: dateStr,
-        averageAdherence: Math.round(dayAverage * 100) / 100,
-        agentsWithData: daySummaries.length,
-      });
-    }
-
-    return {
-      weekStart,
-      weekEnd,
-      totalAgents: employeeMap.size,
-      averageAdherence: Math.round(averageAdherence * 100) / 100,
-      dailyAverages,
-      summary: summaryData,
-    };
   }
 
   /**
    * Generate monthly adherence report
+   * Uses Redis caching for performance
    */
   async generateMonthlyReport(
     month: string, // YYYY-MM
@@ -341,139 +369,150 @@ export class ReportingService {
   ): Promise<MonthlyReportResponse> {
     this.logger.debug(`Generating monthly report for ${month}, department: ${department || 'all'}`);
 
-    const [year, monthNum] = month.split('-').map(Number);
-    const startDate = new Date(year, monthNum - 1, 1);
-    const endDate = new Date(year, monthNum, 0); // Last day of month
+    // TTL: 1 hour for monthly reports (very stable data)
+    const ttlSeconds = 3600;
 
-    const startDateStr = startDate.toISOString().split('T')[0];
-    const endDateStr = endDate.toISOString().split('T')[0];
+    return this.cacheService.getOrSet(
+      'reports',
+      'monthly',
+      { month, department },
+      async () => {
+        const [year, monthNum] = month.split('-').map(Number);
+        const startDate = new Date(year, monthNum - 1, 1);
+        const endDate = new Date(year, monthNum, 0); // Last day of month
 
-    // Build query for summaries in month
-    const qb = this.summaryRepo
-      .createQueryBuilder('summary')
-      .leftJoinAndSelect('summary.employee', 'employee')
-      .where('summary.scheduleDate >= :startDate', { startDate: startDateStr })
-      .andWhere('summary.scheduleDate <= :endDate', { endDate: endDateStr });
+        const startDateStr = startDate.toISOString().split('T')[0];
+        const endDateStr = endDate.toISOString().split('T')[0];
 
-    // Add department filter if specified
-    // Use EXISTS subquery for better performance
-    if (department) {
-      qb.andWhere(
-        `EXISTS (
-          SELECT 1 FROM employees e
-          INNER JOIN departments d ON d.id = e.department_id
-          WHERE e.id = summary.employee_id AND d.name = :department
-        )`,
-        { department },
-      );
-    }
+        // Build query for summaries in month
+        const qb = this.summaryRepo
+          .createQueryBuilder('summary')
+          .leftJoinAndSelect('summary.employee', 'employee')
+          .where('summary.scheduleDate >= :startDate', { startDate: startDateStr })
+          .andWhere('summary.scheduleDate <= :endDate', { endDate: endDateStr });
 
-    this.logger.debug(`Executing query for monthly report`);
-    const startTime = Date.now();
-    const summaries = await qb.getMany();
-    const queryTime = Date.now() - startTime;
-    this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for month ${month}`);
+        // Add department filter if specified
+        // Use EXISTS subquery for better performance
+        if (department) {
+          qb.andWhere(
+            `EXISTS (
+              SELECT 1 FROM employees e
+              INNER JOIN departments d ON d.id = e.department_id
+              WHERE e.id = summary.employee_id AND d.name = :department
+            )`,
+            { department },
+          );
+        }
 
-    // Group by employee and calculate averages
-    const employeeMap = new Map<string, any>();
+        this.logger.debug(`Executing query for monthly report`);
+        const startTime = Date.now();
+        const summaries = await qb.getMany();
+        const queryTime = Date.now() - startTime;
+        this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for month ${month}`);
 
-    summaries.forEach((summary) => {
-      const employeeId = summary.employeeId;
-      if (!employeeMap.has(employeeId)) {
-        employeeMap.set(employeeId, {
-          employeeId,
-          employeeName: summary.employee?.fullNameEn || 'Unknown',
-          hrId: summary.employee?.hrId || null,
-          adherenceValues: [],
-          scheduledMinutes: 0,
-          actualMinutes: 0,
+        // Group by employee and calculate averages
+        const employeeMap = new Map<string, any>();
+
+        summaries.forEach((summary) => {
+          const employeeId = summary.employeeId;
+          if (!employeeMap.has(employeeId)) {
+            employeeMap.set(employeeId, {
+              employeeId,
+              employeeName: summary.employee?.fullNameEn || 'Unknown',
+              hrId: summary.employee?.hrId || null,
+              adherenceValues: [],
+              scheduledMinutes: 0,
+              actualMinutes: 0,
+            });
+          }
+
+          const employeeData = employeeMap.get(employeeId);
+          const adherence = summary.adherencePercentage
+            ? parseFloat(summary.adherencePercentage.toString())
+            : 0;
+          employeeData.adherenceValues.push(adherence);
+          employeeData.scheduledMinutes += summary.scheduledDurationMinutes;
+          employeeData.actualMinutes += summary.actualDurationMinutes;
         });
-      }
 
-      const employeeData = employeeMap.get(employeeId);
-      const adherence = summary.adherencePercentage
-        ? parseFloat(summary.adherencePercentage.toString())
-        : 0;
-      employeeData.adherenceValues.push(adherence);
-      employeeData.scheduledMinutes += summary.scheduledDurationMinutes;
-      employeeData.actualMinutes += summary.actualDurationMinutes;
-    });
+        // Calculate averages per employee
+        const summaryData = Array.from(employeeMap.values()).map((data) => ({
+          employeeId: data.employeeId,
+          employeeName: data.employeeName,
+          hrId: data.hrId,
+          averageAdherence:
+            data.adherenceValues.length > 0
+              ? data.adherenceValues.reduce((a: number, b: number) => a + b, 0) /
+                data.adherenceValues.length
+              : 0,
+          totalScheduledMinutes: data.scheduledMinutes,
+          totalActualMinutes: data.actualMinutes,
+        }));
 
-    // Calculate averages per employee
-    const summaryData = Array.from(employeeMap.values()).map((data) => ({
-      employeeId: data.employeeId,
-      employeeName: data.employeeName,
-      hrId: data.hrId,
-      averageAdherence:
-        data.adherenceValues.length > 0
-          ? data.adherenceValues.reduce((a: number, b: number) => a + b, 0) /
-            data.adherenceValues.length
-          : 0,
-      totalScheduledMinutes: data.scheduledMinutes,
-      totalActualMinutes: data.actualMinutes,
-    }));
+        // Calculate overall average
+        const totalAdherence = summaryData.reduce(
+          (sum, e) => sum + e.averageAdherence,
+          0,
+        );
+        const averageAdherence =
+          summaryData.length > 0 ? totalAdherence / summaryData.length : 0;
 
-    // Calculate overall average
-    const totalAdherence = summaryData.reduce(
-      (sum, e) => sum + e.averageAdherence,
-      0,
+        // Calculate weekly averages
+        const weeklyAverages: Array<{
+          weekStart: string;
+          weekEnd: string;
+          averageAdherence: number;
+        }> = [];
+
+        let currentWeekStart = new Date(startDate);
+        while (currentWeekStart <= endDate) {
+          const currentWeekEnd = new Date(currentWeekStart);
+          currentWeekEnd.setDate(currentWeekEnd.getDate() + 6);
+          if (currentWeekEnd > endDate) {
+            currentWeekEnd.setTime(endDate.getTime());
+          }
+
+          const weekStartStr = currentWeekStart.toISOString().split('T')[0];
+          const weekEndStr = currentWeekEnd.toISOString().split('T')[0];
+
+          const weekSummaries = summaries.filter((s) => {
+            const dateStr = s.scheduleDate instanceof Date 
+              ? s.scheduleDate.toISOString().split('T')[0]
+              : typeof s.scheduleDate === 'string'
+              ? s.scheduleDate
+              : String(s.scheduleDate);
+            return dateStr >= weekStartStr && dateStr <= weekEndStr;
+          });
+
+          const weekAdherence = weekSummaries.reduce((sum, s) => {
+            const adherence = s.adherencePercentage
+              ? parseFloat(s.adherencePercentage.toString())
+              : 0;
+            return sum + adherence;
+          }, 0);
+          const weekAverage =
+            weekSummaries.length > 0 ? weekAdherence / weekSummaries.length : 0;
+
+          weeklyAverages.push({
+            weekStart: weekStartStr,
+            weekEnd: weekEndStr,
+            averageAdherence: Math.round(weekAverage * 100) / 100,
+          });
+
+          currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+        }
+
+        return {
+          month,
+          year,
+          totalAgents: employeeMap.size,
+          averageAdherence: Math.round(averageAdherence * 100) / 100,
+          weeklyAverages,
+          summary: summaryData,
+        };
+      },
+      ttlSeconds,
     );
-    const averageAdherence =
-      summaryData.length > 0 ? totalAdherence / summaryData.length : 0;
-
-    // Calculate weekly averages
-    const weeklyAverages: Array<{
-      weekStart: string;
-      weekEnd: string;
-      averageAdherence: number;
-    }> = [];
-
-    let currentWeekStart = new Date(startDate);
-    while (currentWeekStart <= endDate) {
-      const currentWeekEnd = new Date(currentWeekStart);
-      currentWeekEnd.setDate(currentWeekEnd.getDate() + 6);
-      if (currentWeekEnd > endDate) {
-        currentWeekEnd.setTime(endDate.getTime());
-      }
-
-      const weekStartStr = currentWeekStart.toISOString().split('T')[0];
-      const weekEndStr = currentWeekEnd.toISOString().split('T')[0];
-
-      const weekSummaries = summaries.filter((s) => {
-        const dateStr = s.scheduleDate instanceof Date 
-          ? s.scheduleDate.toISOString().split('T')[0]
-          : typeof s.scheduleDate === 'string'
-          ? s.scheduleDate
-          : String(s.scheduleDate);
-        return dateStr >= weekStartStr && dateStr <= weekEndStr;
-      });
-
-      const weekAdherence = weekSummaries.reduce((sum, s) => {
-        const adherence = s.adherencePercentage
-          ? parseFloat(s.adherencePercentage.toString())
-          : 0;
-        return sum + adherence;
-      }, 0);
-      const weekAverage =
-        weekSummaries.length > 0 ? weekAdherence / weekSummaries.length : 0;
-
-      weeklyAverages.push({
-        weekStart: weekStartStr,
-        weekEnd: weekEndStr,
-        averageAdherence: Math.round(weekAverage * 100) / 100,
-      });
-
-      currentWeekStart.setDate(currentWeekStart.getDate() + 7);
-    }
-
-    return {
-      month,
-      year,
-      totalAgents: employeeMap.size,
-      averageAdherence: Math.round(averageAdherence * 100) / 100,
-      weeklyAverages,
-      summary: summaryData,
-    };
   }
 
   /**

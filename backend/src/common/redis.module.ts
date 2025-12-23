@@ -1,6 +1,7 @@
 import { Module, Global } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { CacheService } from './cache.service';
 
 /**
  * RedisModule
@@ -113,8 +114,9 @@ import Redis from 'ioredis';
       },
       inject: [ConfigService],
     },
+    CacheService,
   ],
-  exports: ['REDIS_CLIENT'],
+  exports: ['REDIS_CLIENT', CacheService],
 })
 export class RedisModule {}
 

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { AdherenceCalculationService } from '../services/adherence-calculation.service';
+import { CacheService } from '../../common/cache.service';
 
 /**
  * AdherenceCalculationScheduler
@@ -14,6 +15,7 @@ export class AdherenceCalculationScheduler {
 
   constructor(
     private adherenceCalculationService: AdherenceCalculationService,
+    private cacheService: CacheService,
   ) {}
 
   /**
@@ -53,6 +55,20 @@ export class AdherenceCalculationScheduler {
           `Daily adherence calculation had ${result.failed} failures. Errors: ${JSON.stringify(result.errors)}`,
         );
       }
+
+      // Invalidate cache for the calculated date
+      const dateStr = egyptTime.toISOString().split('T')[0];
+      this.logger.log(`Invalidating cache for date: ${dateStr}`);
+      
+      // Invalidate summaries and reports for this date
+      await Promise.all([
+        this.cacheService.invalidatePattern(`summaries:*`),
+        this.cacheService.invalidatePattern(`reports:*`),
+        this.cacheService.invalidatePattern(`adherence-read:*`),
+        this.cacheService.invalidatePattern(`agent-status:*`),
+      ]);
+
+      this.logger.log('Cache invalidation completed after daily calculation');
     } catch (error) {
       this.logger.error(
         `Daily adherence calculation job failed: ${error instanceof Error ? error.message : String(error)}`,

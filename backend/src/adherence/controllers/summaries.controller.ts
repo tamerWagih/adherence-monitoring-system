@@ -21,6 +21,7 @@ import { SummariesService, SummariesQueryDto } from '../services/summaries.servi
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AgentSchedule } from '../../entities/agent-schedule.entity';
+import { CacheService } from '../../common/cache.service';
 
 /**
  * SummariesController
@@ -39,6 +40,7 @@ export class SummariesController {
     private summariesService: SummariesService,
     @InjectRepository(AgentSchedule)
     private scheduleRepo: Repository<AgentSchedule>,
+    private cacheService: CacheService,
   ) {}
 
   /**
@@ -123,6 +125,14 @@ export class SummariesController {
         `Successfully calculated adherence for employee ${employeeId} on ${dateStrFormatted}`,
       );
 
+      // Invalidate cache for this employee and date
+      await Promise.all([
+        this.cacheService.invalidatePattern(`summaries:*`),
+        this.cacheService.invalidatePattern(`reports:*`),
+        this.cacheService.invalidatePattern(`adherence-read:*`),
+        this.cacheService.invalidatePattern(`agent-status:byEmployeeId:*${employeeId}*`),
+      ]);
+
       return {
         success: true,
         message: 'Adherence calculated successfully',
@@ -192,10 +202,23 @@ export class SummariesController {
         `Batch calculation completed for ${date.toISOString().split('T')[0]}: ${result.processed} processed, ${result.failed} failed`,
       );
 
+      // Invalidate cache for the calculated date
+      const dateStr = date.toISOString().split('T')[0];
+      this.logger.log(`Invalidating cache for date: ${dateStr}`);
+      
+      await Promise.all([
+        this.cacheService.invalidatePattern(`summaries:*`),
+        this.cacheService.invalidatePattern(`reports:*`),
+        this.cacheService.invalidatePattern(`adherence-read:*`),
+        this.cacheService.invalidatePattern(`agent-status:*`),
+      ]);
+
+      this.logger.log('Cache invalidation completed after batch calculation');
+
       return {
         success: true,
         message: 'Batch calculation completed',
-        date: date.toISOString().split('T')[0],
+        date: dateStr,
         processed: result.processed,
         failed: result.failed,
         errors: result.errors,
