@@ -110,16 +110,11 @@ export class ReportingService {
       .where('summary.scheduleDate = :date', { date });
 
     // Add department filter if specified
-    // Use EXISTS subquery for better performance
+    // Use INNER JOIN for simpler and potentially faster query
     if (department) {
-      qb.andWhere(
-        `EXISTS (
-          SELECT 1 FROM employees e
-          INNER JOIN departments d ON d.id = e.department_id
-          WHERE e.id = summary.employee_id AND d.name = :department
-        )`,
-        { department },
-      );
+      qb.innerJoin('employees', 'emp', 'emp.id = summary.employee_id')
+        .innerJoin('departments', 'dept', 'dept.id = emp.department_id')
+        .andWhere('dept.name = :department', { department });
     }
 
     // Log the SQL query for debugging
