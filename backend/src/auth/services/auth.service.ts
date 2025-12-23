@@ -5,13 +5,20 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { ApiProperty } from '@nestjs/swagger';
+import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
 import { UserService } from './user.service';
 
 export class LoginDto {
   @ApiProperty({ example: 'system.admin@test.com' })
+  @IsEmail()
+  @IsNotEmpty()
+  @MaxLength(255)
   email: string;
 
   @ApiProperty({ example: 'Test123!', format: 'password' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
   password: string;
 }
 
