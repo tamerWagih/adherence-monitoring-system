@@ -27,11 +27,12 @@ import { CacheService } from '../../common/cache.service';
  * SummariesController
  * 
  * Handles adherence summary calculation and retrieval.
- * Protected by JWT authentication and WFM_Admin role.
+ * Protected by JWT authentication and System_Admin role.
+ * System_Admin has access to all endpoints by default.
  */
 @Controller('summaries')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('WFM_Admin')
+@Roles('System_Admin')
 export class SummariesController {
   private readonly logger = new Logger(SummariesController.name);
 

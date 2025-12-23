@@ -23,7 +23,7 @@ import { RegisterWorkstationDto } from '../../dto/register-workstation.dto';
  */
 @Controller('admin/workstations')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('WFM_Admin')
+@Roles('System_Admin')
 export class WorkstationsController {
   constructor(private workstationsService: WorkstationsService) {}
 

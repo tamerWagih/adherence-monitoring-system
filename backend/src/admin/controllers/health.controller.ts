@@ -18,7 +18,7 @@ import { HealthService } from '../services/health.service';
  */
 @Controller('admin/health')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('WFM_Admin')
+@Roles('System_Admin')
 export class HealthController {
   constructor(private healthService: HealthService) {}
 

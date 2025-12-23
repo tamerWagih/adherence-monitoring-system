@@ -18,11 +18,12 @@ import { ReportingService } from '../services/reporting.service';
  * 
  * Handles adherence report generation (daily, weekly, monthly).
  * Supports JSON and CSV export formats.
- * Protected by JWT authentication and WFM_Admin role.
+ * Protected by JWT authentication and System_Admin role.
+ * System_Admin has access to all endpoints by default.
  */
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('WFM_Admin')
+@Roles('System_Admin')
 export class ReportsController {
   private readonly logger = new Logger(ReportsController.name);
 
