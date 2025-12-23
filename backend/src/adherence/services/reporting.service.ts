@@ -109,10 +109,17 @@ export class ReportingService {
       .leftJoinAndSelect('summary.employee', 'employee')
       .where('summary.scheduleDate = :date', { date });
 
-    // Add department join and filter if department is specified
+    // Add department filter if specified
+    // Use subquery approach to avoid join issues
     if (department) {
-      qb.leftJoin('departments', 'department', 'department.id = employee.department_id')
-        .andWhere('department.name = :department', { department });
+      qb.andWhere(
+        `summary.employeeId IN (
+          SELECT e.id FROM employees e
+          INNER JOIN departments d ON d.id = e.department_id
+          WHERE d.name = :department
+        )`,
+        { department },
+      );
     }
 
     this.logger.debug(`Executing query for daily report`);
@@ -310,10 +317,17 @@ export class ReportingService {
       .where('summary.scheduleDate >= :startDate', { startDate: startDateStr })
       .andWhere('summary.scheduleDate <= :endDate', { endDate: endDateStr });
 
-    // Add department join and filter if department is specified
+    // Add department filter if specified
+    // Use subquery approach to avoid join issues
     if (department) {
-      qb.leftJoin('departments', 'department', 'department.id = employee.department_id')
-        .andWhere('department.name = :department', { department });
+      qb.andWhere(
+        `summary.employeeId IN (
+          SELECT e.id FROM employees e
+          INNER JOIN departments d ON d.id = e.department_id
+          WHERE d.name = :department
+        )`,
+        { department },
+      );
     }
 
     this.logger.debug(`Executing query for monthly report`);
