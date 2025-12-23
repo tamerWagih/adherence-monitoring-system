@@ -107,11 +107,11 @@ export class ReportingService {
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
       .leftJoinAndSelect('summary.employee', 'employee')
+      .leftJoin('departments', 'department', 'department.id = employee.department_id')
       .where('summary.scheduleDate = :date', { date });
 
     if (department) {
-      // Note: Adjust based on actual employee schema
-      qb.andWhere('employee.department = :department', { department });
+      qb.andWhere('department.name = :department', { department });
     }
 
     const summaries = await qb.getMany();
@@ -183,11 +183,12 @@ export class ReportingService {
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
       .leftJoinAndSelect('summary.employee', 'employee')
+      .leftJoin('departments', 'department', 'department.id = employee.department_id')
       .where('summary.scheduleDate >= :weekStart', { weekStart })
       .andWhere('summary.scheduleDate <= :weekEnd', { weekEnd });
 
     if (department) {
-      qb.andWhere('employee.department = :department', { department });
+      qb.andWhere('department.name = :department', { department });
     }
 
     const summaries = await qb.getMany();
@@ -302,11 +303,12 @@ export class ReportingService {
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
       .leftJoinAndSelect('summary.employee', 'employee')
+      .leftJoin('departments', 'department', 'department.id = employee.department_id')
       .where('summary.scheduleDate >= :startDate', { startDate: startDateStr })
       .andWhere('summary.scheduleDate <= :endDate', { endDate: endDateStr });
 
     if (department) {
-      qb.andWhere('employee.department = :department', { department });
+      qb.andWhere('department.name = :department', { department });
     }
 
     const summaries = await qb.getMany();
