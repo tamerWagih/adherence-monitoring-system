@@ -294,7 +294,7 @@ export class ReportingService {
     month: string, // YYYY-MM
     department?: string,
   ): Promise<MonthlyReportResponse> {
-    this.logger.debug(`Generating monthly report for ${month}`);
+    this.logger.debug(`Generating monthly report for ${month}, department: ${department || 'all'}`);
 
     const [year, monthNum] = month.split('-').map(Number);
     const startDate = new Date(year, monthNum - 1, 1);
@@ -307,15 +307,18 @@ export class ReportingService {
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
       .leftJoinAndSelect('summary.employee', 'employee')
-      .leftJoin('departments', 'department', 'department.id = employee.department_id')
       .where('summary.scheduleDate >= :startDate', { startDate: startDateStr })
       .andWhere('summary.scheduleDate <= :endDate', { endDate: endDateStr });
 
+    // Add department join and filter if department is specified
     if (department) {
-      qb.andWhere('department.name = :department', { department });
+      qb.leftJoin('departments', 'department', 'department.id = employee.department_id')
+        .andWhere('department.name = :department', { department });
     }
 
+    this.logger.debug(`Executing query for monthly report`);
     const summaries = await qb.getMany();
+    this.logger.debug(`Found ${summaries.length} summaries for month ${month}`);
 
     // Group by employee and calculate averages
     const employeeMap = new Map<string, any>();
