@@ -110,21 +110,23 @@ export class ReportingService {
       .where('summary.scheduleDate = :date', { date });
 
     // Add department filter if specified
-    // Use subquery approach to avoid join issues
+    // Use EXISTS subquery for better performance
     if (department) {
       qb.andWhere(
-        `summary.employee_id IN (
-          SELECT e.id FROM employees e
+        `EXISTS (
+          SELECT 1 FROM employees e
           INNER JOIN departments d ON d.id = e.department_id
-          WHERE d.name = :department
+          WHERE e.id = summary.employee_id AND d.name = :department
         )`,
         { department },
       );
     }
 
     this.logger.debug(`Executing query for daily report`);
+    const startTime = Date.now();
     const summaries = await qb.getMany();
-    this.logger.debug(`Found ${summaries.length} summaries for date ${date}`);
+    const queryTime = Date.now() - startTime;
+    this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for date ${date}`);
 
     // Calculate statistics
     const agentsWithData = summaries.length;
@@ -197,21 +199,23 @@ export class ReportingService {
       .andWhere('summary.scheduleDate <= :weekEnd', { weekEnd });
 
     // Add department filter if specified
-    // Use subquery approach to avoid join issues
+    // Use EXISTS subquery for better performance
     if (department) {
       qb.andWhere(
-        `summary.employee_id IN (
-          SELECT e.id FROM employees e
+        `EXISTS (
+          SELECT 1 FROM employees e
           INNER JOIN departments d ON d.id = e.department_id
-          WHERE d.name = :department
+          WHERE e.id = summary.employee_id AND d.name = :department
         )`,
         { department },
       );
     }
 
     this.logger.debug(`Executing query for weekly report`);
+    const startTime = Date.now();
     const summaries = await qb.getMany();
-    this.logger.debug(`Found ${summaries.length} summaries for week ${weekStart} to ${weekEnd}`);
+    const queryTime = Date.now() - startTime;
+    this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for week ${weekStart} to ${weekEnd}`);
 
     // Group by employee and calculate averages
     const employeeMap = new Map<string, any>();
@@ -327,21 +331,23 @@ export class ReportingService {
       .andWhere('summary.scheduleDate <= :endDate', { endDate: endDateStr });
 
     // Add department filter if specified
-    // Use subquery approach to avoid join issues
+    // Use EXISTS subquery for better performance
     if (department) {
       qb.andWhere(
-        `summary.employee_id IN (
-          SELECT e.id FROM employees e
+        `EXISTS (
+          SELECT 1 FROM employees e
           INNER JOIN departments d ON d.id = e.department_id
-          WHERE d.name = :department
+          WHERE e.id = summary.employee_id AND d.name = :department
         )`,
         { department },
       );
     }
 
     this.logger.debug(`Executing query for monthly report`);
+    const startTime = Date.now();
     const summaries = await qb.getMany();
-    this.logger.debug(`Found ${summaries.length} summaries for month ${month}`);
+    const queryTime = Date.now() - startTime;
+    this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for month ${month}`);
 
     // Group by employee and calculate averages
     const employeeMap = new Map<string, any>();

@@ -129,13 +129,13 @@ export class SummariesService {
       });
     }
 
-    // Department filter - use subquery to avoid join issues
+    // Department filter - use EXISTS subquery for better performance
     if (query.department) {
       qb.andWhere(
-        `summary.employee_id IN (
-          SELECT e.id FROM employees e
+        `EXISTS (
+          SELECT 1 FROM employees e
           INNER JOIN departments d ON d.id = e.department_id
-          WHERE d.name = :department
+          WHERE e.id = summary.employee_id AND d.name = :department
         )`,
         { department: query.department },
       );
