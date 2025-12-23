@@ -247,7 +247,14 @@ export class ReportingService {
     for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0];
       const daySummaries = summaries.filter(
-        (s) => s.scheduleDate.toISOString().split('T')[0] === dateStr,
+        (s) => {
+          const sDateStr = s.scheduleDate instanceof Date 
+            ? s.scheduleDate.toISOString().split('T')[0]
+            : typeof s.scheduleDate === 'string'
+            ? s.scheduleDate
+            : String(s.scheduleDate);
+          return sDateStr === dateStr;
+        },
       );
       const dayAdherence = daySummaries.reduce((sum, s) => {
         const adherence = s.adherencePercentage
@@ -370,7 +377,11 @@ export class ReportingService {
       const weekEndStr = currentWeekEnd.toISOString().split('T')[0];
 
       const weekSummaries = summaries.filter((s) => {
-        const dateStr = s.scheduleDate.toISOString().split('T')[0];
+        const dateStr = s.scheduleDate instanceof Date 
+          ? s.scheduleDate.toISOString().split('T')[0]
+          : typeof s.scheduleDate === 'string'
+          ? s.scheduleDate
+          : String(s.scheduleDate);
         return dateStr >= weekStartStr && dateStr <= weekEndStr;
       });
 

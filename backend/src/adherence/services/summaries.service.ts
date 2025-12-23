@@ -156,12 +156,20 @@ export class SummariesService {
    * Transform summary entity to response format
    */
   private transformSummary(summary: AgentAdherenceSummary): any {
+    // Handle scheduleDate - PostgreSQL date type returns string, not Date object
+    const scheduleDateStr = 
+      summary.scheduleDate instanceof Date 
+        ? summary.scheduleDate.toISOString().split('T')[0]
+        : typeof summary.scheduleDate === 'string'
+        ? summary.scheduleDate
+        : String(summary.scheduleDate);
+
     return {
       id: summary.id,
       employeeId: summary.employeeId,
       employeeName: summary.employee?.fullNameEn || null,
       hrId: summary.employee?.hrId || null,
-      scheduleDate: summary.scheduleDate.toISOString().split('T')[0],
+      scheduleDate: scheduleDateStr,
       scheduledStartTime: summary.scheduledStartTime,
       scheduledEndTime: summary.scheduledEndTime,
       scheduledDurationMinutes: summary.scheduledDurationMinutes,
