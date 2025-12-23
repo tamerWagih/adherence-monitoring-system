@@ -106,18 +106,22 @@ export class ReportingService {
     // Build query for summaries on the date
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
+      .leftJoinAndSelect('summary.employee', 'employee')
       .where('summary.scheduleDate = :date', { date });
 
     // Add department filter if specified
+    // Use WHERE clause with subquery to avoid join conflicts
     if (department) {
-      // Join employees and departments for filtering
-      qb.innerJoin('employees', 'emp', 'emp.id = summary.employee_id')
-        .innerJoin('departments', 'dept', 'dept.id = emp.department_id')
-        .andWhere('dept.name = :department', { department });
+      qb.andWhere(
+        `summary.employee_id IN (
+          SELECT e.id 
+          FROM employees e
+          INNER JOIN departments d ON d.id = e.department_id
+          WHERE d.name = :department
+        )`,
+        { department },
+      );
     }
-
-    // Always load employee data AFTER filtering (to avoid duplicate joins)
-    qb.leftJoinAndSelect('summary.employee', 'employee');
 
     // Log the SQL query for debugging
     const sql = qb.getSql();
