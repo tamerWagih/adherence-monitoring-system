@@ -92,14 +92,26 @@ export class WorkstationsController {
   @Post(':id/revoke')
   @ApiOperation({ summary: 'Revoke workstation (admin)' })
   @ApiParam({ name: 'id', required: true, type: String, description: 'Workstation UUID' })
+  @ApiBody({
+    required: false,
+    schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', example: 'Workstation replaced' },
+      },
+    },
+  })
   @ApiResponse({ status: 200, description: 'Workstation revoked' })
   @ApiResponse({ status: 400, description: 'Invalid input' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async revokeWorkstation(
     @Param('id') workstationId: string,
-    @Body() body: { reason?: string },
+    @Body() body?: { reason?: string },
   ) {
-    return this.workstationsService.revokeWorkstation(workstationId, body.reason);
+    return this.workstationsService.revokeWorkstation(
+      workstationId,
+      body?.reason,
+    );
   }
 }
 
