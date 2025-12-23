@@ -9,6 +9,15 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { RolesGuard } from '../../guards/roles.guard';
 import { Roles } from '../../decorators/roles.decorator';
@@ -22,9 +31,11 @@ import { RegisterWorkstationDto } from '../../dto/register-workstation.dto';
  * Protected by JWT authentication and System_Admin role.
  * System_Admin has access to all endpoints by default.
  */
+@ApiTags('Admin')
 @Controller('admin/workstations')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('System_Admin')
+@ApiBearerAuth('JWT-auth')
 export class WorkstationsController {
   constructor(private workstationsService: WorkstationsService) {}
 
@@ -34,6 +45,11 @@ export class WorkstationsController {
    * List all workstations with status.
    */
   @Get()
+  @ApiOperation({ summary: 'List workstations (admin)' })
+  @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiQuery({ name: 'employeeId', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Workstations list returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async listWorkstations(@Query() query: any) {
     return this.workstationsService.listWorkstations(query);
   }
@@ -44,6 +60,9 @@ export class WorkstationsController {
    * Get registration status dashboard data.
    */
   @Get('status')
+  @ApiOperation({ summary: 'Workstation registration status (admin dashboard)' })
+  @ApiResponse({ status: 200, description: 'Registration status returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getRegistrationStatus(@Query() query: any) {
     return this.workstationsService.getRegistrationStatus(query);
   }
@@ -56,6 +75,11 @@ export class WorkstationsController {
    */
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Register workstation (admin)' })
+  @ApiBody({ type: RegisterWorkstationDto })
+  @ApiResponse({ status: 201, description: 'Workstation registered (API key returned once)' })
+  @ApiResponse({ status: 400, description: 'Invalid request body' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async registerWorkstation(@Body() dto: RegisterWorkstationDto) {
     return this.workstationsService.registerWorkstation(dto);
   }
@@ -66,6 +90,11 @@ export class WorkstationsController {
    * Revoke/deactivate a workstation.
    */
   @Post(':id/revoke')
+  @ApiOperation({ summary: 'Revoke workstation (admin)' })
+  @ApiParam({ name: 'id', required: true, type: String, description: 'Workstation UUID' })
+  @ApiResponse({ status: 200, description: 'Workstation revoked' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async revokeWorkstation(
     @Param('id') workstationId: string,
     @Body() body: { reason?: string },

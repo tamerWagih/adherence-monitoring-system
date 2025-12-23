@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -22,6 +23,58 @@ async function bootstrap() {
 
   // Set global API prefix
   app.setGlobalPrefix('api/adherence');
+
+  // Swagger / OpenAPI
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Adherence Monitoring Backend API')
+    .setDescription('API documentation for the Adherence Monitoring System')
+    .setVersion('1.0.0')
+    // JWT for System_Admin endpoints
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'Authorization',
+        description: 'Paste JWT access token (without "Bearer ")',
+        in: 'header',
+      },
+      'JWT-auth',
+    )
+    // Desktop Agent auth (workstation headers)
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'X-API-Key',
+        in: 'header',
+        description: 'Workstation API key (Desktop Agent)',
+      },
+      'API-Key',
+    )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'X-Workstation-ID',
+        in: 'header',
+        description: 'Workstation ID (Desktop Agent)',
+      },
+      'Workstation-ID',
+    )
+    .addTag('Authentication')
+    .addTag('Summaries')
+    .addTag('Reports')
+    .addTag('Admin')
+    .addTag('Events')
+    .addTag('Agent')
+    .build();
+
+  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+  // Note: SwaggerModule.setup path is NOT affected by app.setGlobalPrefix
+  SwaggerModule.setup('api/docs', app, swaggerDocument, {
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  });
 
   // Add health endpoint (before prefix)
   app.getHttpAdapter().get('/health', (req, res) => {
@@ -91,6 +144,7 @@ async function bootstrap() {
   console.log(`🚀 Adherence Backend server running on port ${port}`);
   console.log(`📊 Health check: http://localhost:${port}/health`);
   console.log(`🔌 API endpoints: http://localhost:${port}/api/adherence`);
+  console.log(`📚 Swagger UI: http://localhost:${port}/api/docs`);
 }
 
 bootstrap();

@@ -13,6 +13,14 @@ import {
   NotFoundException,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { RolesGuard } from '../../guards/roles.guard';
 import { Roles } from '../../decorators/roles.decorator';
@@ -30,9 +38,11 @@ import { CacheService } from '../../common/cache.service';
  * Protected by JWT authentication and System_Admin role.
  * System_Admin has access to all endpoints by default.
  */
+@ApiTags('Summaries')
 @Controller('summaries')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('System_Admin')
+@ApiBearerAuth('JWT-auth')
 export class SummariesController {
   private readonly logger = new Logger(SummariesController.name);
 
@@ -55,6 +65,12 @@ export class SummariesController {
    */
   @Post('calculate')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Calculate adherence for one employee (manual trigger)' })
+  @ApiQuery({ name: 'employeeId', required: true, type: String, description: 'Employee UUID' })
+  @ApiQuery({ name: 'date', required: false, type: String, description: 'YYYY-MM-DD (defaults to yesterday)' })
+  @ApiResponse({ status: 200, description: 'Calculation completed' })
+  @ApiResponse({ status: 400, description: 'Invalid input (missing employeeId/date or no schedule found)' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async calculateAdherence(
     @Query('employeeId') employeeId?: string,
     @Query('date') dateStr?: string,
@@ -165,6 +181,12 @@ export class SummariesController {
    */
   @Post('batch-calculate')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Batch calculate adherence for scheduled employees' })
+  @ApiQuery({ name: 'date', required: false, type: String, description: 'YYYY-MM-DD (defaults to yesterday)' })
+  @ApiQuery({ name: 'batchSize', required: false, type: Number, description: 'Employees per batch (default 50)' })
+  @ApiResponse({ status: 200, description: 'Batch calculation completed' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async batchCalculateAdherence(
     @Query('date') dateStr?: string,
     @Query('batchSize') batchSizeStr?: string,
@@ -250,6 +272,17 @@ export class SummariesController {
    * - limit: Items per page (default: 50, max: 500)
    */
   @Get()
+  @ApiOperation({ summary: 'List adherence summaries (admin)' })
+  @ApiQuery({ name: 'employeeId', required: false, type: String })
+  @ApiQuery({ name: 'startDate', required: false, type: String, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'endDate', required: false, type: String, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'department', required: false, type: String })
+  @ApiQuery({ name: 'minAdherence', required: false, type: Number })
+  @ApiQuery({ name: 'maxAdherence', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Summaries list returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getSummaries(@Query() query: SummariesQueryDto) {
     try {
       return await this.summariesService.getSummaries(query);
@@ -275,6 +308,10 @@ export class SummariesController {
    * Note: This route must come before @Get(':id') to avoid route conflicts.
    */
   @Get('realtime')
+  @ApiOperation({ summary: 'Real-time adherence (today) for active agents (admin)' })
+  @ApiQuery({ name: 'department', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Realtime adherence returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getRealtimeAdherence(@Query('department') department?: string) {
     try {
       // Get today's summaries for active agents
@@ -340,6 +377,11 @@ export class SummariesController {
    * Note: This route must come after @Get('realtime') to avoid route conflicts.
    */
   @Get(':id')
+  @ApiOperation({ summary: 'Get adherence summary by ID' })
+  @ApiParam({ name: 'id', required: true, type: String, description: 'Summary UUID' })
+  @ApiResponse({ status: 200, description: 'Summary returned' })
+  @ApiResponse({ status: 404, description: 'Summary not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getSummaryById(@Param('id', ParseUUIDPipe) id: string) {
     try {
       const summary = await this.summariesService.getSummaryById(id);

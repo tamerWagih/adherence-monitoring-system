@@ -9,6 +9,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ThrottleExceptionFilter } from '../../common/filters/throttle-exception.filter';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { EventIngestionService } from '../services/event-ingestion.service';
@@ -26,9 +27,12 @@ import { CreateAdherenceEventDto, BatchEventsDto } from '../../dto/create-adhere
  * Option 2 (Always Queue): All events are queued and processed asynchronously.
  * Returns 202 Accepted immediately after queuing.
  */
+@ApiTags('Events')
 @Controller('events')
 @UseGuards(WorkstationAuthGuard, WorkstationRateLimitGuard, ThrottlerGuard)
 @UseFilters(ThrottleExceptionFilter)
+@ApiSecurity('API-Key')
+@ApiSecurity('Workstation-ID')
 export class EventsController {
   private readonly logger = new Logger(EventsController.name);
 
@@ -57,6 +61,15 @@ export class EventsController {
    */
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Ingest events from Desktop Agent (queued)',
+    description:
+      'Queues a single event or batch of events for async processing. Requires workstation API key headers.',
+  })
+  @ApiResponse({ status: 202, description: 'Events queued for processing' })
+  @ApiResponse({ status: 400, description: 'Invalid request body / empty batch' })
+  @ApiResponse({ status: 401, description: 'Invalid workstation credentials' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   async ingestEvents(
     @Body() body: CreateAdherenceEventDto | BatchEventsDto,
     @Request() req: any,

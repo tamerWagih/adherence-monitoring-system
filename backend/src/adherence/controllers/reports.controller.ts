@@ -8,6 +8,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { RolesGuard } from '../../guards/roles.guard';
 import { Roles } from '../../decorators/roles.decorator';
@@ -21,9 +22,11 @@ import { ReportingService } from '../services/reporting.service';
  * Protected by JWT authentication and System_Admin role.
  * System_Admin has access to all endpoints by default.
  */
+@ApiTags('Reports')
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('System_Admin')
+@ApiBearerAuth('JWT-auth')
 export class ReportsController {
   private readonly logger = new Logger(ReportsController.name);
 
@@ -40,6 +43,13 @@ export class ReportsController {
    * - format: Response format - 'json' or 'csv' (default: 'json')
    */
   @Get('daily')
+  @ApiOperation({ summary: 'Generate daily adherence report' })
+  @ApiQuery({ name: 'date', required: true, type: String, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'department', required: false, type: String })
+  @ApiQuery({ name: 'format', required: false, type: String, description: 'json | csv', example: 'json' })
+  @ApiResponse({ status: 200, description: 'Report generated (JSON) or returned as CSV string' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getDailyReport(
     @Query('date') date?: string,
     @Query('department') department?: string,
@@ -96,6 +106,14 @@ export class ReportsController {
    * - format: Response format - 'json' or 'csv' (default: 'json')
    */
   @Get('weekly')
+  @ApiOperation({ summary: 'Generate weekly adherence report' })
+  @ApiQuery({ name: 'weekStart', required: true, type: String, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'weekEnd', required: true, type: String, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'department', required: false, type: String })
+  @ApiQuery({ name: 'format', required: false, type: String, description: 'json | csv', example: 'json' })
+  @ApiResponse({ status: 200, description: 'Report generated (JSON) or returned as CSV string' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getWeeklyReport(
     @Query('weekStart') weekStart?: string,
     @Query('weekEnd') weekEnd?: string,
@@ -162,6 +180,13 @@ export class ReportsController {
    * - format: Response format - 'json' or 'csv' (default: 'json')
    */
   @Get('monthly')
+  @ApiOperation({ summary: 'Generate monthly adherence report' })
+  @ApiQuery({ name: 'month', required: true, type: String, description: 'YYYY-MM' })
+  @ApiQuery({ name: 'department', required: false, type: String })
+  @ApiQuery({ name: 'format', required: false, type: String, description: 'json | csv', example: 'json' })
+  @ApiResponse({ status: 200, description: 'Report generated (JSON) or returned as CSV string' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getMonthlyReport(
     @Query('month') month?: string,
     @Query('department') department?: string,

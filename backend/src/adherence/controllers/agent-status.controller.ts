@@ -1,4 +1,5 @@
 import { Controller, Get, UseGuards, Request, Query, Logger } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { AgentStatusService } from '../services/agent-status.service';
 
@@ -11,8 +12,10 @@ import { AgentStatusService } from '../services/agent-status.service';
  * Note: Currently uses placeholder JWT auth. In Week 5, NT account will be
  * extracted from JWT token. For now, accepts NT as query parameter for testing.
  */
+@ApiTags('Agent')
 @Controller('agent')
 @UseGuards(JwtAuthGuard)
+@ApiBearerAuth('JWT-auth')
 export class AgentStatusController {
   private readonly logger = new Logger(AgentStatusController.name);
 
@@ -35,6 +38,10 @@ export class AgentStatusController {
    * - If NT mapped: Returns workstation status and adherence data
    */
   @Get('status')
+  @ApiOperation({ summary: 'Get agent status (agent-facing)' })
+  @ApiQuery({ name: 'nt', required: false, type: String, description: 'Windows NT account (temporary for testing)' })
+  @ApiResponse({ status: 200, description: 'Agent status returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getAgentStatus(@Request() req: any, @Query('nt') ntAccount?: string) {
     try {
       // TODO Week 5: Extract NT account from JWT token
