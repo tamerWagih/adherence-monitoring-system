@@ -2,17 +2,16 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
+  OneToMany,
 } from 'typeorm';
+import * as bcrypt from 'bcrypt';
+import { UserRole } from './user-role.entity';
 
 /**
- * User Entity (Minimal)
+ * User Entity
  * 
- * Minimal copy of User entity for Adherence Backend.
- * Only includes fields needed for exception relationships.
- * 
- * Note: This is a minimal copy for the adherence backend.
- * The full entity exists in people-ops-system, but we use this
- * to avoid cross-repo dependencies while sharing the same database.
+ * Reads from shared users table in database.
+ * Includes password and roles for authentication.
  */
 @Entity('users')
 export class User {
@@ -23,9 +22,34 @@ export class User {
   email: string;
 
   @Column()
+  password: string;
+
+  @Column()
   firstName: string;
 
   @Column()
   lastName: string;
+
+  @Column({ default: true })
+  isActive: boolean;
+
+  @Column({ name: 'lastLoginAt', type: 'timestamptz', nullable: true })
+  lastLoginAt?: Date | null;
+
+  @Column({ name: 'employee_id', nullable: true })
+  employeeId?: string;
+
+  @OneToMany(() => UserRole, (userRole) => userRole.user)
+  userRoles: UserRole[];
+
+  // Virtual property to get roles
+  get roles(): string[] {
+    return this.userRoles?.map((userRole) => userRole.role?.name) || [];
+  }
+
+  // Method to compare password
+  async comparePassword(candidatePassword: string): Promise<boolean> {
+    return bcrypt.compare(candidatePassword, this.password);
+  }
 }
 

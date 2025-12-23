@@ -10,10 +10,12 @@ import { AppService } from './app.service';
 import { AdherenceModule } from './adherence/adherence.module';
 import { AdminModule } from './admin/admin.module';
 import { RedisModule } from './common/redis.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
     RedisModule, // Redis for rate limiting and queues
+    AuthModule, // Authentication module
     AdherenceModule,
     AdminModule,
     // Configuration Module
