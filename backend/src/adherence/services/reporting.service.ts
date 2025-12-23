@@ -142,7 +142,16 @@ export class ReportingService {
       this.logger.error(`Failed Parameters: ${JSON.stringify(params)}`);
       throw error;
     }
+  }
 
+  /**
+   * Build daily report response from summaries
+   */
+  private buildDailyReportResponse(
+    date: string,
+    summaries: AgentAdherenceSummary[],
+    department?: string,
+  ): DailyReportResponse {
     // Calculate statistics
     const agentsWithData = summaries.length;
     const totalAdherence = summaries.reduce((sum, s) => {
@@ -172,18 +181,6 @@ export class ReportingService {
       else if (adherence >= 60) ranges['60-69']++;
       else ranges['0-59']++;
     });
-
-    // Transform summary data
-    const summaryData = summaries.map((summary) => ({
-      employeeId: summary.employeeId,
-      employeeName: summary.employee?.fullNameEn || 'Unknown',
-      hrId: summary.employee?.hrId || null,
-      adherencePercentage: summary.adherencePercentage
-        ? parseFloat(summary.adherencePercentage.toString())
-        : 0,
-      scheduledMinutes: summary.scheduledDurationMinutes,
-      actualMinutes: summary.actualDurationMinutes,
-    }));
 
     return {
       reportDate: date,
