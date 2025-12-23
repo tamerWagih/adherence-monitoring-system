@@ -113,7 +113,7 @@ export class ReportingService {
     // Use subquery approach to avoid join issues
     if (department) {
       qb.andWhere(
-        `"summary"."employee_id" IN (
+        `agent_adherence_summaries.employee_id IN (
           SELECT e.id FROM employees e
           INNER JOIN departments d ON d.id = e.department_id
           WHERE d.name = :department
@@ -200,7 +200,7 @@ export class ReportingService {
     // Use subquery approach to avoid join issues
     if (department) {
       qb.andWhere(
-        `"summary"."employee_id" IN (
+        `agent_adherence_summaries.employee_id IN (
           SELECT e.id FROM employees e
           INNER JOIN departments d ON d.id = e.department_id
           WHERE d.name = :department
@@ -330,7 +330,7 @@ export class ReportingService {
     // Use subquery approach to avoid join issues
     if (department) {
       qb.andWhere(
-        `"summary"."employee_id" IN (
+        `agent_adherence_summaries.employee_id IN (
           SELECT e.id FROM employees e
           INNER JOIN departments d ON d.id = e.department_id
           WHERE d.name = :department
