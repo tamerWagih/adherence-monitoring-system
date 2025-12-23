@@ -122,11 +122,26 @@ export class ReportingService {
       );
     }
 
+    // Log the SQL query for debugging
+    const sql = qb.getSql();
+    const params = qb.getParameters();
+    this.logger.debug(`SQL Query: ${sql}`);
+    this.logger.debug(`Query Parameters: ${JSON.stringify(params)}`);
+    
     this.logger.debug(`Executing query for daily report`);
     const startTime = Date.now();
-    const summaries = await qb.getMany();
-    const queryTime = Date.now() - startTime;
-    this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for date ${date}`);
+    try {
+      const summaries = await qb.getMany();
+      const queryTime = Date.now() - startTime;
+      this.logger.debug(`Query completed in ${queryTime}ms, found ${summaries.length} summaries for date ${date}`);
+      return this.buildDailyReportResponse(date, summaries, department);
+    } catch (error) {
+      const queryTime = Date.now() - startTime;
+      this.logger.error(`Query failed after ${queryTime}ms: ${error.message}`);
+      this.logger.error(`Failed SQL: ${sql}`);
+      this.logger.error(`Failed Parameters: ${JSON.stringify(params)}`);
+      throw error;
+    }
 
     // Calculate statistics
     const agentsWithData = summaries.length;
