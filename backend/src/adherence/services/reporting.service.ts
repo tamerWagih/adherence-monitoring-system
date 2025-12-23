@@ -196,13 +196,22 @@ export class ReportingService {
       .where('summary.scheduleDate >= :weekStart', { weekStart })
       .andWhere('summary.scheduleDate <= :weekEnd', { weekEnd });
 
-    // Add department join and filter if department is specified
+    // Add department filter if specified
+    // Use subquery approach to avoid join issues
     if (department) {
-      qb.leftJoin('departments', 'department', 'department.id = employee.department_id')
-        .andWhere('department.name = :department', { department });
+      qb.andWhere(
+        `summary.employeeId IN (
+          SELECT e.id FROM employees e
+          INNER JOIN departments d ON d.id = e.department_id
+          WHERE d.name = :department
+        )`,
+        { department },
+      );
     }
 
+    this.logger.debug(`Executing query for weekly report`);
     const summaries = await qb.getMany();
+    this.logger.debug(`Found ${summaries.length} summaries for week ${weekStart} to ${weekEnd}`);
 
     // Group by employee and calculate averages
     const employeeMap = new Map<string, any>();
