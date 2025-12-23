@@ -34,6 +34,43 @@ export class AuthService {
     private readonly userService: UserService,
   ) {}
 
+  private parseExpiresInToSeconds(expiresIn: string | number | undefined): number {
+    if (expiresIn === undefined || expiresIn === null) return 15 * 60;
+
+    if (typeof expiresIn === 'number') {
+      return expiresIn;
+    }
+
+    const value = String(expiresIn).trim();
+    if (!value) return 15 * 60;
+
+    // If it's purely numeric, treat as seconds
+    if (/^\d+$/.test(value)) {
+      return parseInt(value, 10);
+    }
+
+    const match = value.match(/^(\d+)\s*([smhd])$/i);
+    if (!match) {
+      // Fallback to 15 minutes if format is unexpected (keeps server usable)
+      return 15 * 60;
+    }
+
+    const amount = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+    switch (unit) {
+      case 's':
+        return amount;
+      case 'm':
+        return amount * 60;
+      case 'h':
+        return amount * 60 * 60;
+      case 'd':
+        return amount * 24 * 60 * 60;
+      default:
+        return 15 * 60;
+    }
+  }
+
   /**
    * Validate user credentials
    */
@@ -80,10 +117,8 @@ export class AuthService {
     const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
     // Generate tokens
-    const expiresIn = parseInt(
-      this.configService.get<string>('JWT_EXPIRES_IN') || '900',
-      10,
-    ); // Default 15 minutes
+    const expiresInSetting = this.configService.get<string>('JWT_EXPIRES_IN') || '15m';
+    const expiresInSeconds = this.parseExpiresInToSeconds(expiresInSetting);
 
     const accessToken = this.jwtService.sign(
       {
@@ -94,7 +129,8 @@ export class AuthService {
         type: 'access',
       },
       {
-        expiresIn,
+        // IMPORTANT: allow standard formats like '15m', '1h', etc.
+        expiresIn: expiresInSetting,
       },
     );
 
@@ -124,7 +160,7 @@ export class AuthService {
       },
       accessToken,
       refreshToken,
-      expiresIn,
+      expiresIn: expiresInSeconds,
     };
   }
 }

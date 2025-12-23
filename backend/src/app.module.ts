@@ -14,16 +14,16 @@ import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
-    RedisModule, // Redis for rate limiting and queues
-    AuthModule, // Authentication module
-    AdherenceModule,
-    AdminModule,
     // Configuration Module
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env', '.env.local'],
       ignoreEnvFile: false,
     }),
+    RedisModule, // Redis for rate limiting and queues
+    AuthModule, // Authentication module
+    AdherenceModule,
+    AdminModule,
 
     // Schedule Module (for cron jobs - partition management, cleanup)
     ScheduleModule.forRoot(),
