@@ -19,7 +19,8 @@ import { RegisterWorkstationDto } from '../../dto/register-workstation.dto';
  * WorkstationsController
  * 
  * Admin endpoints for workstation management.
- * Protected by JWT authentication and WFM_Admin role.
+ * Protected by JWT authentication and System_Admin role.
+ * System_Admin has access to all endpoints by default.
  */
 @Controller('admin/workstations')
 @UseGuards(JwtAuthGuard, RolesGuard)

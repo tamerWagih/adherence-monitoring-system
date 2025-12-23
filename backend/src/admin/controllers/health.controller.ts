@@ -9,12 +9,10 @@ import { HealthService } from '../services/health.service';
  * 
  * Admin endpoints for system health monitoring.
  * 
- * Authentication: JWT + WFM_Admin role required (per API specification).
+ * Authentication: JWT + System_Admin role required.
  * The health endpoint returns sensitive metrics (event counts, database status, etc.)
- * and should only be accessible to administrators.
- * 
- * For Week 2: Works with placeholder JWT auth (any Bearer token accepted).
- * For Week 5: Will require full JWT validation.
+ * and should only be accessible to system administrators.
+ * System_Admin has access to all endpoints by default.
  */
 @Controller('admin/health')
 @UseGuards(JwtAuthGuard, RolesGuard)
