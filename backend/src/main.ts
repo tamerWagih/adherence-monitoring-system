@@ -71,12 +71,22 @@ async function bootstrap() {
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   // Note: SwaggerModule.setup path is NOT affected by app.setGlobalPrefix
   // Swagger UI will be available at: http://host:port/api/docs
-  SwaggerModule.setup('api/docs', app, swaggerDocument, {
+  const swaggerSetupOptions = {
     swaggerOptions: {
       persistAuthorization: true,
     },
     customSiteTitle: 'Adherence Backend API Docs',
-  });
+  };
+
+  // Local/dev convenience (direct backend access)
+  SwaggerModule.setup('api/docs', app, swaggerDocument, swaggerSetupOptions);
+  // VM / reverse-proxy compatibility (most setups only proxy /api/adherence/*)
+  SwaggerModule.setup(
+    'api/adherence/docs',
+    app,
+    swaggerDocument,
+    swaggerSetupOptions,
+  );
 
   // Add health endpoint (before prefix)
   app.getHttpAdapter().get('/health', (req, res) => {
