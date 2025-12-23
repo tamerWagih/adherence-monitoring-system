@@ -63,6 +63,7 @@ export class SummariesService {
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
       .leftJoinAndSelect('summary.employee', 'employee')
+      .leftJoin('departments', 'department', 'department.id = employee.department_id')
       .orderBy('summary.scheduleDate', 'DESC')
       .addOrderBy('employee.fullNameEn', 'ASC');
 
@@ -129,12 +130,10 @@ export class SummariesService {
       });
     }
 
-    // Department filter (via employee join)
+    // Department filter (via employee join with departments table)
     if (query.department) {
-      // Note: Department filtering requires joining with employees table
-      // This assumes employees table has a department field
-      // If not, this filter will need to be adjusted based on actual schema
-      qb.andWhere('employee.department = :department', {
+      // Join with departments table and filter by department name
+      qb.andWhere('department.name = :department', {
         department: query.department,
       });
     }
