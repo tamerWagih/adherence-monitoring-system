@@ -239,36 +239,7 @@ export class SummariesController {
   }
 
   /**
-   * GET /api/adherence/summaries/:id
-   * 
-   * Get a single adherence summary by ID.
-   * 
-   * @param id - Summary UUID
-   */
-  @Get(':id')
-  async getSummaryById(@Param('id', ParseUUIDPipe) id: string) {
-    try {
-      const summary = await this.summariesService.getSummaryById(id);
-      
-      if (!summary) {
-        throw new NotFoundException(`Summary with ID ${id} not found`);
-      }
-
-      return summary;
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-      this.logger.error(
-        `Failed to get summary ${id}: ${error instanceof Error ? error.message : String(error)}`,
-        error instanceof Error ? error.stack : undefined,
-      );
-      throw error;
-    }
-  }
-
-  /**
-   * GET /api/adherence/realtime
+   * GET /api/adherence/summaries/realtime
    * 
    * Get real-time adherence for all active agents.
    * Returns current shift adherence based on today's summaries and latest events.
@@ -276,6 +247,8 @@ export class SummariesController {
    * 
    * Query Parameters:
    * - department: Filter by department (optional)
+   * 
+   * Note: This route must come before @Get(':id') to avoid route conflicts.
    */
   @Get('realtime')
   async getRealtimeAdherence(@Query('department') department?: string) {
@@ -327,6 +300,37 @@ export class SummariesController {
     } catch (error) {
       this.logger.error(
         `Failed to get real-time adherence: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * GET /api/adherence/summaries/:id
+   * 
+   * Get a single adherence summary by ID.
+   * 
+   * @param id - Summary UUID
+   * 
+   * Note: This route must come after @Get('realtime') to avoid route conflicts.
+   */
+  @Get(':id')
+  async getSummaryById(@Param('id', ParseUUIDPipe) id: string) {
+    try {
+      const summary = await this.summariesService.getSummaryById(id);
+      
+      if (!summary) {
+        throw new NotFoundException(`Summary with ID ${id} not found`);
+      }
+
+      return summary;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(
+        `Failed to get summary ${id}: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
       );
       throw error;
