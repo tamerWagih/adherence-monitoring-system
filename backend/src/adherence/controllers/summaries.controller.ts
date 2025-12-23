@@ -4,16 +4,20 @@ import {
   Get,
   Body,
   Query,
+  Param,
   UseGuards,
   HttpCode,
   HttpStatus,
   Logger,
   BadRequestException,
+  NotFoundException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { RolesGuard } from '../../guards/roles.guard';
 import { Roles } from '../../decorators/roles.decorator';
 import { AdherenceCalculationService } from '../services/adherence-calculation.service';
+import { SummariesService, SummariesQueryDto } from '../services/summaries.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AgentSchedule } from '../../entities/agent-schedule.entity';
@@ -32,6 +36,7 @@ export class SummariesController {
 
   constructor(
     private adherenceCalculationService: AdherenceCalculationService,
+    private summariesService: SummariesService,
     @InjectRepository(AgentSchedule)
     private scheduleRepo: Repository<AgentSchedule>,
   ) {}
@@ -198,6 +203,130 @@ export class SummariesController {
     } catch (error) {
       this.logger.error(
         `Failed to batch calculate adherence: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * GET /api/adherence/summaries
+   * 
+   * List adherence summaries with filters and pagination.
+   * Admin-facing endpoint (no RBAC filtering - shows all data).
+   * 
+   * Query Parameters:
+   * - employeeId: Filter by employee UUID (optional)
+   * - startDate: Start date (YYYY-MM-DD) (optional)
+   * - endDate: End date (YYYY-MM-DD) (optional)
+   * - department: Filter by department (optional)
+   * - minAdherence: Minimum adherence percentage (optional)
+   * - maxAdherence: Maximum adherence percentage (optional)
+   * - page: Page number (default: 1)
+   * - limit: Items per page (default: 50, max: 500)
+   */
+  @Get()
+  async getSummaries(@Query() query: SummariesQueryDto) {
+    try {
+      return await this.summariesService.getSummaries(query);
+    } catch (error) {
+      this.logger.error(
+        `Failed to get summaries: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * GET /api/adherence/summaries/:id
+   * 
+   * Get a single adherence summary by ID.
+   * 
+   * @param id - Summary UUID
+   */
+  @Get(':id')
+  async getSummaryById(@Param('id', ParseUUIDPipe) id: string) {
+    try {
+      const summary = await this.summariesService.getSummaryById(id);
+      
+      if (!summary) {
+        throw new NotFoundException(`Summary with ID ${id} not found`);
+      }
+
+      return summary;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(
+        `Failed to get summary ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * GET /api/adherence/realtime
+   * 
+   * Get real-time adherence for all active agents.
+   * Returns current shift adherence based on today's summaries and latest events.
+   * Admin-facing endpoint (no RBAC filtering - shows all agents).
+   * 
+   * Query Parameters:
+   * - department: Filter by department (optional)
+   */
+  @Get('realtime')
+  async getRealtimeAdherence(@Query('department') department?: string) {
+    try {
+      // Get today's summaries for active agents
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+
+      const query: SummariesQueryDto = {
+        startDate: todayStr,
+        endDate: todayStr,
+        department,
+        limit: 1000, // Get all active agents
+      };
+
+      const result = await this.summariesService.getSummaries(query);
+
+      // Transform to real-time format
+      const realtimeData = result.data.map((summary: any) => ({
+        employeeId: summary.employeeId,
+        employeeName: summary.employeeName,
+        hrId: summary.hrId,
+        scheduleDate: summary.scheduleDate,
+        scheduledStartTime: summary.scheduledStartTime,
+        scheduledEndTime: summary.scheduledEndTime,
+        currentAdherence: summary.adherencePercentage,
+        startVarianceMinutes: summary.startVarianceMinutes,
+        endVarianceMinutes: summary.endVarianceMinutes,
+        breakCompliancePercentage: summary.breakCompliancePercentage,
+        productiveTimeMinutes: summary.productiveTimeMinutes,
+        idleTimeMinutes: summary.idleTimeMinutes,
+        awayTimeMinutes: summary.awayTimeMinutes,
+        // Real-time status indicators
+        isCurrentlyActive: summary.actualEndTime === null, // No end time = still active
+        minutesIntoShift: summary.actualStartTime
+          ? Math.floor(
+              (new Date().getTime() - new Date(summary.actualStartTime).getTime()) /
+                (1000 * 60),
+            )
+          : 0,
+      }));
+
+      return {
+        timestamp: new Date().toISOString(),
+        totalAgents: realtimeData.length,
+        activeAgents: realtimeData.filter((a: any) => a.isCurrentlyActive).length,
+        data: realtimeData,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to get real-time adherence: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
       );
       throw error;

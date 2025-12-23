@@ -16,11 +16,14 @@ import { EventsController } from './controllers/events.controller';
 import { WorkstationConfigController } from './controllers/workstation-config.controller';
 import { AgentStatusController } from './controllers/agent-status.controller';
 import { SummariesController } from './controllers/summaries.controller';
+import { ReportsController } from './controllers/reports.controller';
 import { EventIngestionService } from './services/event-ingestion.service';
 import { WorkstationConfigService } from './services/workstation-config.service';
 import { WorkstationAuthService } from './services/workstation-auth.service';
 import { AgentStatusService } from './services/agent-status.service';
 import { AdherenceCalculationService } from './services/adherence-calculation.service';
+import { SummariesService } from './services/summaries.service';
+import { ReportingService } from './services/reporting.service';
 import { EventIngestionQueue } from './queues/event-ingestion.queue';
 import { EventIngestionProcessor } from './queues/event-ingestion.processor';
 import { AdherenceCalculationScheduler } from './schedulers/adherence-calculation.scheduler';
@@ -65,6 +68,7 @@ import { PartitionManagementScheduler } from './schedulers/partition-management.
     WorkstationConfigController,
     AgentStatusController,
     SummariesController,
+    ReportsController,
   ],
   providers: [
     EventIngestionService,
@@ -72,6 +76,8 @@ import { PartitionManagementScheduler } from './schedulers/partition-management.
     WorkstationAuthService,
     AgentStatusService,
     AdherenceCalculationService,
+    SummariesService,
+    ReportingService,
     EventIngestionQueue,
     EventIngestionProcessor,
     AdherenceCalculationScheduler,
