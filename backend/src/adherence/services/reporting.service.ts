@@ -101,20 +101,23 @@ export class ReportingService {
     date: string, // YYYY-MM-DD
     department?: string,
   ): Promise<DailyReportResponse> {
-    this.logger.debug(`Generating daily report for ${date}`);
+    this.logger.debug(`Generating daily report for ${date}, department: ${department || 'all'}`);
 
     // Build query for summaries on the date
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
       .leftJoinAndSelect('summary.employee', 'employee')
-      .leftJoin('departments', 'department', 'department.id = employee.department_id')
       .where('summary.scheduleDate = :date', { date });
 
+    // Add department join and filter if department is specified
     if (department) {
-      qb.andWhere('department.name = :department', { department });
+      qb.leftJoin('departments', 'department', 'department.id = employee.department_id')
+        .andWhere('department.name = :department', { department });
     }
 
+    this.logger.debug(`Executing query for daily report`);
     const summaries = await qb.getMany();
+    this.logger.debug(`Found ${summaries.length} summaries for date ${date}`);
 
     // Calculate statistics
     const agentsWithData = summaries.length;
