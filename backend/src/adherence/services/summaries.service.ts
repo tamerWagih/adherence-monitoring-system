@@ -63,13 +63,10 @@ export class SummariesService {
     const qb = this.summaryRepo
       .createQueryBuilder('summary')
       .leftJoinAndSelect('summary.employee', 'employee')
-      // Join with departments table using raw SQL column name (department_id exists in DB but not in entity)
-      .leftJoin('departments', 'department', 'department.id = employees.department_id')
+      // Join with departments table - use alias 'employee' and column name 'department_id'
+      .leftJoin('departments', 'department', 'department.id = employee.department_id')
       .orderBy('summary.scheduleDate', 'DESC')
       .addOrderBy('employee.fullNameEn', 'ASC');
-    
-    // Note: We use 'employees.department_id' (table name) instead of 'employee.department_id' (alias)
-    // because TypeORM needs the actual table name for columns not defined in the entity
 
     // Apply filters
     this.applyFilters(qb, query);
