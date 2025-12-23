@@ -27,5 +27,8 @@ export class Employee {
 
   @Column({ name: 'full_name_en', length: 255 })
   fullNameEn: string;
+
+  @Column({ name: 'department_id', type: 'uuid', nullable: true })
+  departmentId?: string;
 }
 
