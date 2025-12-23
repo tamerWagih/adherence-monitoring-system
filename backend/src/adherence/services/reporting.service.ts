@@ -182,10 +182,22 @@ export class ReportingService {
       else ranges['0-59']++;
     });
 
+    const summaryData = summaries.map((s) => ({
+      employeeId: s.employeeId,
+      employeeName: s.employee?.fullNameEn || 'Unknown',
+      hrId: s.employee?.hrId || null,
+      department: department || undefined,
+      adherencePercentage: s.adherencePercentage
+        ? parseFloat(s.adherencePercentage.toString())
+        : 0,
+      scheduledMinutes: s.scheduledDurationMinutes,
+      actualMinutes: s.actualDurationMinutes,
+    }));
+
     return {
       reportDate: date,
-      totalAgents: 0, // TODO: Get from employees table if needed
-      agentsWithSchedule: agentsWithData, // Approximate
+      totalAgents: summaries.length,
+      agentsWithSchedule: summaries.length,
       agentsWithData,
       averageAdherence: Math.round(averageAdherence * 100) / 100,
       agentsByAdherenceRange: ranges,
