@@ -43,7 +43,7 @@ export class ReportsController {
     @Query('date') date?: string,
     @Query('department') department?: string,
     @Query('format') format: string = 'json',
-    @Res({ passthrough: true }) res: Response,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     if (!date) {
       throw new BadRequestException('date query parameter is required (YYYY-MM-DD)');
@@ -65,8 +65,8 @@ export class ReportsController {
 
       if (format === 'csv') {
         const csv = this.reportingService.generateDailyReportCSV(report);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader(
+        res?.setHeader('Content-Type', 'text/csv');
+        res?.setHeader(
           'Content-Disposition',
           `attachment; filename="adherence_daily_${date}.csv"`,
         );
@@ -100,7 +100,7 @@ export class ReportsController {
     @Query('weekEnd') weekEnd?: string,
     @Query('department') department?: string,
     @Query('format') format: string = 'json',
-    @Res({ passthrough: true }) res: Response,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     if (!weekStart || !weekEnd) {
       throw new BadRequestException(
@@ -132,8 +132,8 @@ export class ReportsController {
 
       if (format === 'csv') {
         const csv = this.reportingService.generateWeeklyReportCSV(report);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader(
+        res?.setHeader('Content-Type', 'text/csv');
+        res?.setHeader(
           'Content-Disposition',
           `attachment; filename="adherence_weekly_${weekStart}_to_${weekEnd}.csv"`,
         );
@@ -165,7 +165,7 @@ export class ReportsController {
     @Query('month') month?: string,
     @Query('department') department?: string,
     @Query('format') format: string = 'json',
-    @Res({ passthrough: true }) res: Response,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     if (!month) {
       throw new BadRequestException('month query parameter is required (YYYY-MM)');
@@ -187,8 +187,8 @@ export class ReportsController {
 
       if (format === 'csv') {
         const csv = this.reportingService.generateMonthlyReportCSV(report);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader(
+        res?.setHeader('Content-Type', 'text/csv');
+        res?.setHeader(
           'Content-Disposition',
           `attachment; filename="adherence_monthly_${month}.csv"`,
         );
